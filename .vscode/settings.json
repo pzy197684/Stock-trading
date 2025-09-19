@@ -2,5 +2,6 @@
     "editor.wordWrap": "off",
     "editor.accessibilitySupport": "auto",
     "explorer.fileNesting.enabled": false,
-    "outline.collapseItems": "alwaysExpand"
+    "outline.collapseItems": "alwaysExpand",
+    "git.ignoreLimitWarning": true
 }
