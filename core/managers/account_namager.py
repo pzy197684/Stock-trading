@@ -1,5 +1,6 @@
 # core/managers/account_manager.py
-from typing import Dict
+# 功能：管理交易账号及其关联的平台实例
+from typing import Dict, Type
 from core.domain.models import OrderReq
 from core.platform.base import ExchangeIf
 from core.platform.binance import BinanceExchange
@@ -27,13 +28,18 @@ class AccountManager:
         # 使用api_key和api_secret等信息创建平台实例
         # 假设我们已有各平台的适配器，如 BinanceExchange、CoinWExchange 等
         platform_class = self._get_platform_class(platform_name)
+        if platform_class is ExchangeIf:
+            raise ValueError(f"不支持的平台：{platform_name}")
+        
         return platform_class(api_key=api_key, api_secret=api_secret)
 
-    def _get_platform_class(self, platform_name: str) -> ExchangeIf:
+    def _get_platform_class(self, platform_name: str) -> Type[ExchangeIf]:
         """获取平台适配器类"""
         platform_classes = {
             "binance": BinanceExchange,
             "coinw": CoinWExchange,
             "okx": OKXExchange,
         }
-        return platform_classes.get(platform_name,ExchangeIf)
+        platform_class = platform_classes.get(platform_name, ExchangeIf)
+        
+        return platform_class

@@ -1,3 +1,5 @@
+# core/managers/strategy_manager.py
+# 功能：管理和加载交易策略
 from core.logger import logger
 from core.strategy.base import StrategyBase
 from typing import List
@@ -16,10 +18,20 @@ class StrategyManager:
             "martingale_v3": "core.strategy.martingale_v3.strategy.MartingaleV3Strategy",
             # 可以继续添加其他策略
         }
-        module_name, class_name = strategy_classes.get(strategy_name, "").rsplit('.', 1)
-        module = __import__(module_name, fromlist=[class_name])
-        strategy_class = getattr(module, class_name)
-        return strategy_class
+        path = strategy_classes.get(strategy_name)
+        if not path:
+            if isinstance(strategy_name, str) and '.' in strategy_name:
+                path = strategy_name
+            else:
+                raise ValueError(f"Unknown strategy: {strategy_name}. Available: {list(strategy_classes.keys())}")
+
+        try:
+            module_name, class_name = path.rsplit('.', 1)
+            module = __import__(module_name, fromlist=[class_name])
+            strategy_class = getattr(module, class_name)
+            return strategy_class
+        except Exception as e:
+            raise ImportError(f"Failed to import strategy '{path}': {e}") from e
 
     def get_active_strategies(self):
         """获取所有活跃的策略实例"""

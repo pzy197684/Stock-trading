@@ -1,4 +1,5 @@
 # core/services/hedge_service.py
+# 功能：锁仓服务，负责锁仓和解锁仓位
 from core.logger import logger
 
 def lock_position(ctx, plan):

@@ -1,3 +1,4 @@
 # 忽略 Python 的字节码文件
 __pycache__/
 *.pyc
+old/

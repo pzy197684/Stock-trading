@@ -1,0 +1,65 @@
+{
+    "name": "coinw",
+    "display_name": "CoinW",
+    "description": "CoinW cryptocurrency exchange",
+    "adapter_class": "core.platform.coinw:CoinWExchange",
+    "version": "1.0.0",
+    "supported_instruments": ["FUTURES"],
+    "capabilities": {
+        "hedge_support": false,
+        "position_mode": "single",
+        "unit_type": "contract",
+        "supported_order_types": ["market", "limit"],
+        "rate_limit": {
+            "requests_per_second": 8,
+            "orders_per_minute": 60
+        }
+    },
+    "default_config": {
+        "recv_window": 5000,
+        "timeout": 30,
+        "retry_attempts": 3
+    },
+    "required_credentials": [
+        {
+            "name": "api_key",
+            "display_name": "API Key", 
+            "description": "CoinW API Key",
+            "type": "string",
+            "required": true
+        },
+        {
+            "name": "api_secret",
+            "display_name": "API Secret",
+            "description": "CoinW API Secret", 
+            "type": "string",
+            "required": true,
+            "sensitive": true
+        }
+    ],
+    "config_schema": {
+        "type": "object",
+        "properties": {
+            "recv_window": {
+                "type": "integer",
+                "default": 5000,
+                "minimum": 1000,
+                "maximum": 60000,
+                "description": "Request receive window in milliseconds"
+            },
+            "timeout": {
+                "type": "integer", 
+                "default": 30,
+                "minimum": 5,
+                "maximum": 120,
+                "description": "Request timeout in seconds"
+            }
+        }
+    },
+    "metadata": {
+        "author": "Stock-Trading Team",
+        "created_at": "2025-09-27",
+        "tags": ["crypto", "futures"],
+        "documentation_url": "https://coinw.com/api"
+    }
+}

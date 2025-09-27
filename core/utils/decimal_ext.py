@@ -1,4 +1,5 @@
 # core/utils/decimal_ext.py
+# 功能：扩展Decimal的功能，提供更方便的数值处理
 from decimal import Decimal, ROUND_DOWN
 
 def round_decimal(value: float, precision: int = 4) -> Decimal:

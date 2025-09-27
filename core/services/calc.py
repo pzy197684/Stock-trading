@@ -1,4 +1,5 @@
 # core/services/calc.py
+# 功能：提供各种计算功能，如盈利计算、仓位价值计算等
 def calculate_profit(entry_price: float, exit_price: float, qty: float) -> float:
     """计算盈利或亏损"""
     return (exit_price - entry_price) * qty

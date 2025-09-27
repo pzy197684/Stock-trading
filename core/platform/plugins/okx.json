@@ -1,0 +1,80 @@
+{
+    "name": "okx",
+    "display_name": "OKX",
+    "description": "OKX cryptocurrency exchange",
+    "adapter_class": "core.platform.okx:OKXExchange", 
+    "version": "1.0.0",
+    "supported_instruments": ["SPOT", "FUTURES", "OPTIONS"],
+    "capabilities": {
+        "hedge_support": true,
+        "position_mode": "both",
+        "unit_type": "coin",
+        "supported_order_types": ["market", "limit", "stop", "stop_limit"],
+        "rate_limit": {
+            "requests_per_second": 20,
+            "orders_per_minute": 120
+        }
+    },
+    "default_config": {
+        "testnet": false,
+        "recv_window": 5000,
+        "timeout": 30,
+        "retry_attempts": 3,
+        "passphrase": ""
+    },
+    "required_credentials": [
+        {
+            "name": "api_key",
+            "display_name": "API Key",
+            "description": "OKX API Key", 
+            "type": "string",
+            "required": true
+        },
+        {
+            "name": "api_secret", 
+            "display_name": "API Secret",
+            "description": "OKX API Secret",
+            "type": "string",
+            "required": true,
+            "sensitive": true
+        },
+        {
+            "name": "passphrase",
+            "display_name": "Passphrase",
+            "description": "OKX API Passphrase",
+            "type": "string", 
+            "required": true,
+            "sensitive": true
+        }
+    ],
+    "config_schema": {
+        "type": "object",
+        "properties": {
+            "testnet": {
+                "type": "boolean",
+                "default": false,
+                "description": "Use testnet environment"
+            },
+            "recv_window": {
+                "type": "integer",
+                "default": 5000,
+                "minimum": 1000,
+                "maximum": 60000,
+                "description": "Request receive window in milliseconds"
+            },
+            "timeout": {
+                "type": "integer",
+                "default": 30,
+                "minimum": 5,
+                "maximum": 120,
+                "description": "Request timeout in seconds"
+            }
+        }
+    },
+    "metadata": {
+        "author": "Stock-Trading Team",
+        "created_at": "2025-09-27",
+        "tags": ["crypto", "spot", "futures", "options"],
+        "documentation_url": "https://www.okx.com/docs/en/"
+    }
+}

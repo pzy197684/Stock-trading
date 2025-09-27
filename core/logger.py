@@ -1,41 +1,39 @@
+
 # core/logger.py
+# 功能：日志记录功能，支持不同级别的日志输出（控制台+文件）
 import logging
 import os
 
+LOG_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "logs"))
+os.makedirs(LOG_DIR, exist_ok=True)
+LOG_FILE = os.path.join(LOG_DIR, "runtime.log")
+
 class Logger:
-    def __init__(self, log_file="logs/runtime.log"):
-        # 创建日志器
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.DEBUG)
-
-        # 控制台输出处理
-        self.console_handler = logging.StreamHandler()
-        # 文件输出处理
-        self.file_handler = logging.FileHandler(log_file)
-
-        # 日志格式
+    def __init__(self, log_file=LOG_FILE):
+        self.logger = logging.getLogger("stock_trading")
+        self.logger.setLevel(logging.INFO)
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        self.console_handler.setFormatter(formatter)
-        self.file_handler.setFormatter(formatter)
-
-        # 添加处理器
-        self.logger.addHandler(self.console_handler)
-        self.logger.addHandler(self.file_handler)
+        # 控制台
+        ch = logging.StreamHandler()
+        ch.setFormatter(formatter)
+        # 文件
+        fh = logging.FileHandler(log_file, encoding="utf-8")
+        fh.setFormatter(formatter)
+        # 避免重复添加handler
+        if not self.logger.handlers:
+            self.logger.addHandler(ch)
+            self.logger.addHandler(fh)
 
     def log_info(self, message):
-        """日志 - 信息级别"""
         self.logger.info(message)
 
     def log_warning(self, message):
-        """日志 - 警告级别"""
         self.logger.warning(message)
 
     def log_error(self, message):
-        """日志 - 错误级别"""
         self.logger.error(message)
 
     def log_exception(self, message):
-        """日志 - 异常级别"""
         self.logger.exception(message)
 
 # 实例化 Logger

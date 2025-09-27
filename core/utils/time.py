@@ -1,4 +1,5 @@
 # core/utils/time.py
+# 功能：提供时间相关的工具函数
 from datetime import datetime
 
 def get_current_timestamp() -> int:

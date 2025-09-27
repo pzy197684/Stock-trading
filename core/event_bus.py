@@ -1,4 +1,5 @@
 # core/event_bus.py
+# 功能：实现一个简单的事件总线，用于组件间通信
 class EventBus:
     def __init__(self):
         # 存储事件及其回调函数
