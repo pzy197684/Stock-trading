@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -68,6 +68,12 @@ export function PlatformConfig() {
   const [selectedPlatform, setSelectedPlatform] = useState("binance");
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<ParameterTemplate | null>(null);
+  
+  // API数据状态
+  const [apiPlatforms, setApiPlatforms] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
+  
   const [templateFormData, setTemplateFormData] = useState<Partial<ParameterTemplate>>({
     name: '',
     description: '',
@@ -82,6 +88,30 @@ export function PlatformConfig() {
       maxGrids: 20
     }
   });
+
+  // 从API获取平台列表
+  const fetchPlatforms = async () => {
+    try {
+      setIsLoading(true);
+      setApiError(null);
+      const response = await fetch('http://localhost:8000/api/platforms/available');
+      if (!response.ok) {
+        throw new Error(`API错误: ${response.status}`);
+      }
+      const data = await response.json();
+      setApiPlatforms(data.platforms || []);
+    } catch (error) {
+      console.error('获取平台列表失败:', error);
+      setApiError('无法连接到API服务器');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 初始化数据
+  useEffect(() => {
+    fetchPlatforms();
+  }, []);
 
   const [platformConfigs, setPlatformConfigs] = useState<Record<string, PlatformConfig>>({
     binance: {
@@ -247,7 +277,62 @@ export function PlatformConfig() {
     }
   });
 
-  const currentConfig = platformConfigs[selectedPlatform];
+  // 基于API数据生成平台配置
+  const getCurrentConfig = () => {
+    const apiPlatform = apiPlatforms.find(p => p.id === selectedPlatform);
+    if (!apiPlatform) return null;
+
+    return {
+      id: apiPlatform.id,
+      name: apiPlatform.name,
+      icon: apiPlatform.icon || "⚫",
+      status: 'connected' as const,
+      accounts: 1, // Default value, could be calculated from actual data
+      settings: {
+        requestFrequency: apiPlatform.capabilities?.rate_limit?.requests_per_second || 10,
+        timeout: apiPlatform.default_config?.timeout || 30,
+        retryAttempts: apiPlatform.default_config?.retry_attempts || 3,
+        enableProxy: false,
+        proxyUrl: '',
+        enableRateLimit: true,
+        maxOrdersPerSecond: apiPlatform.capabilities?.rate_limit?.orders_per_minute || 100,
+        enableFailover: false,
+        primaryEndpoint: '',
+        backupEndpoint: ''
+      },
+      limits: {
+        maxDailyOrders: 1000,
+        maxPositionSize: 10000,
+        minOrderValue: 10
+      },
+      templates: [],
+      fees: {
+        makerFee: 0.001,
+        takerFee: 0.001,
+        withdrawalFee: 0.005
+      }
+    };
+  };
+
+  const currentConfig = getCurrentConfig();
+
+  if (!currentConfig) {
+    return (
+      <div className="space-y-4 md:space-y-6">
+        {isLoading ? (
+          <div className="text-center py-8">
+            <div className="text-muted-foreground">正在加载平台配置...</div>
+          </div>
+        ) : (
+          <div className="text-center py-8">
+            <div className="text-muted-foreground">
+              {apiError || "暂无平台配置数据"}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -373,17 +458,17 @@ export function PlatformConfig() {
     <div className="space-y-4 md:space-y-6">
       {/* Platform Selection */}
       <div className="flex flex-wrap gap-2 md:gap-4">
-        {Object.values(platformConfigs).map((platform) => (
+        {apiPlatforms.map((platform: any) => (
           <Button
             key={platform.id}
             variant={selectedPlatform === platform.id ? "default" : "outline"}
             onClick={() => setSelectedPlatform(platform.id)}
             className="flex items-center gap-2 text-xs md:text-sm"
           >
-            <span>{platform.icon}</span>
+            <span>{platform.icon || "⚫"}</span>
             {platform.name}
             <Badge variant="secondary" className="ml-2 text-xs">
-              {platform.accounts}
+              1
             </Badge>
           </Button>
         ))}

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
@@ -24,79 +24,89 @@ export function LogsPanel() {
   const [levelFilter, setLevelFilter] = useState("all");
   const [accountFilter, setAccountFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+  
+  // API数据状态
+  const [apiLogs, setApiLogs] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
+  
   const { toast } = useToast();
 
-  const mockLogs: LogEntry[] = [
-    {
-      id: "1",
-      timestamp: "2024-09-19 14:35:22",
-      level: "success",
-      account: "币安-账户A",
-      strategy: "网格策略",
-      message: "买入订单执行成功 BTC/USDT @67,500",
-      profit: 25.5
-    },
-    {
-      id: "2",
-      timestamp: "2024-09-19 14:34:15",
-      level: "info",
-      account: "火币-账户B",
-      strategy: "套利策略",
-      message: "检测到套利机会 ETH/USDT 价差0.5%"
-    },
-    {
-      id: "3",
-      timestamp: "2024-09-19 14:33:08",
-      level: "warning",
-      account: "OKEx-账户C",
-      strategy: "趋势跟踪",
-      message: "网络延迟较高，建议检查连接"
-    },
-    {
-      id: "4",
-      timestamp: "2024-09-19 14:32:45",
-      level: "error",
-      account: "OKEx-账户C",
-      strategy: "趋势跟踪",
-      message: "API密钥验证失败"
-    },
-    {
-      id: "5",
-      timestamp: "2024-09-19 14:31:30",
-      level: "success",
-      account: "火币-账户B",
-      strategy: "套利策略",
-      message: "套利交易完成",
-      profit: 15.8
-    },
-    {
-      id: "6",
-      timestamp: "2024-09-19 14:30:12",
-      level: "info",
-      account: "币安-账户A",
-      strategy: "网格策略",
-      message: "网格策略启动成功"
+  // 从API获取日志
+  const fetchLogs = async () => {
+    try {
+      setIsLoading(true);
+      setApiError(null);
+      
+      const params = new URLSearchParams();
+      params.append('limit', '100');
+      if (levelFilter !== 'all') {
+        params.append('level', levelFilter.toUpperCase());
+      }
+      
+      const response = await fetch(`http://localhost:8000/api/logs/recent?${params}`);
+      if (!response.ok) {
+        throw new Error(`API错误: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      setApiLogs(data.logs || []);
+      
+      if (data.note) {
+        setApiError(data.note);
+      }
+    } catch (error) {
+      console.error('获取日志失败:', error);
+      setApiError('无法连接到API服务器');
+    } finally {
+      setIsLoading(false);
     }
-  ];
+  };
 
-  const accounts = ["all", ...Array.from(new Set(mockLogs.map(log => log.account)))];
+  // 初始化和定期刷新日志
+  useEffect(() => {
+    fetchLogs();
+    
+    const interval = setInterval(fetchLogs, 10000); // 每10秒刷新日志
+    return () => clearInterval(interval);
+  }, [levelFilter]);
+
+  // 响应式刷新日志
+  useEffect(() => {
+    if (levelFilter !== 'all') {
+      fetchLogs();
+    }
+  }, [levelFilter]);
+
+  // 直接使用API数据
+  const logs = apiLogs.map((apiLog: any, index: number) => ({
+    id: index.toString(),
+    timestamp: apiLog.timestamp,
+    level: apiLog.level.toLowerCase(),
+    account: apiLog.source || "系统",
+    strategy: "未知", // API暂不支持
+    message: apiLog.message,
+    profit: undefined // API日志暂不包含盈亏信息
+  }));
+
+  const accounts = ["all", ...Array.from(new Set(logs.map(log => log.account)))];
   
-  const filteredLogs = mockLogs.filter(log => {
+  const filteredLogs = logs.filter(log => {
     const matchesLevel = levelFilter === "all" || log.level === levelFilter;
     const matchesAccount = accountFilter === "all" || log.account === accountFilter;
     const matchesSearch = searchQuery === "" || 
       log.message.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      log.strategy.toLowerCase().includes(searchQuery.toLowerCase());
+      (log.strategy && log.strategy.toLowerCase().includes(searchQuery.toLowerCase()));
     
     return matchesLevel && matchesAccount && matchesSearch;
   });
 
-  const totalProfit = mockLogs
+  const totalProfit = logs
     .filter(log => log.profit !== undefined)
     .reduce((sum, log) => sum + (log.profit || 0), 0);
 
-  const profitableTrades = mockLogs.filter(log => log.profit && log.profit > 0).length;
-  const losingTrades = mockLogs.filter(log => log.profit && log.profit < 0).length;
+  const profitableTrades = logs.filter(log => log.profit && log.profit > 0).length;
+  const losingTrades = logs.filter(log => log.profit && log.profit < 0).length;
   const winRate = profitableTrades + losingTrades > 0 
     ? (profitableTrades / (profitableTrades + losingTrades) * 100).toFixed(1)
     : "0";
@@ -329,7 +339,7 @@ export function LogsPanel() {
             <CardContent>
               <ScrollArea className="h-96 pr-4">
                 <div className="space-y-4 pb-4">
-                  {mockLogs.filter(log => log.profit !== undefined).map((trade) => (
+                  {logs.filter(log => log.profit !== undefined).map((trade) => (
                     <div key={trade.id} className="border rounded-lg p-3 md:p-4 transition-all duration-200 hover:bg-muted/30">
                       <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
                         <div>
@@ -367,7 +377,7 @@ export function LogsPanel() {
                     <h4 className="font-medium mb-4">按账户统计</h4>
                     <div className="space-y-3">
                       {accounts.slice(1).map(account => {
-                        const accountTrades = mockLogs.filter(log => log.account === account && log.profit !== undefined);
+                        const accountTrades = logs.filter(log => log.account === account && log.profit !== undefined);
                         const accountProfit = accountTrades.reduce((sum, log) => sum + (log.profit || 0), 0);
                         const accountTradeCount = accountTrades.length;
                         
@@ -392,8 +402,8 @@ export function LogsPanel() {
                   <div>
                     <h4 className="font-medium mb-4">按策略统计</h4>
                     <div className="space-y-3">
-                      {Array.from(new Set(mockLogs.map(log => log.strategy))).map(strategy => {
-                        const strategyTrades = mockLogs.filter(log => log.strategy === strategy && log.profit !== undefined);
+                      {Array.from(new Set(logs.map(log => log.strategy))).map(strategy => {
+                        const strategyTrades = logs.filter(log => log.strategy === strategy && log.profit !== undefined);
                         const strategyProfit = strategyTrades.reduce((sum, log) => sum + (log.profit || 0), 0);
                         const strategyTradeCount = strategyTrades.length;
                         

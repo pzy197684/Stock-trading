@@ -117,7 +117,117 @@ export function CurrentRunning() {
   const [settingsInstance, setSettingsInstance] =
     useState<TradingInstance | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
+  
+  // API数据状态
+  const [apiInstances, setApiInstances] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
+  
   const { toast } = useToast();
+
+  // 从API获取运行实例
+  const fetchRunningInstances = async () => {
+    try {
+      setIsLoading(true);
+      setApiError(null);
+      const response = await fetch('http://localhost:8000/api/running/instances');
+      if (!response.ok) {
+        throw new Error(`API错误: ${response.status}`);
+      }
+      const data = await response.json();
+      setApiInstances(data.instances || []);
+    } catch (error) {
+      console.error('获取运行实例失败:', error);
+      setApiError('无法连接到API服务器');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 启动策略
+  const startStrategy = async (accountId: string, strategyName: string, parameters: any = {}) => {
+    try {
+      const response = await fetch('http://localhost:8000/api/strategy/start', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          account_id: accountId,
+          strategy_name: strategyName,
+          parameters,
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`启动失败: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      if (result.success) {
+        toast({
+          title: "策略启动成功",
+          description: result.message,
+        });
+        fetchRunningInstances(); // 刷新数据
+      } else {
+        throw new Error(result.message);
+      }
+    } catch (error) {
+      console.error('启动策略失败:', error);
+      toast({
+        title: "启动失败",
+        description: error.message || '未知错误',
+        variant: "destructive",
+      });
+    }
+  };
+
+  // 停止策略
+  const stopStrategy = async (accountId: string, instanceId: string) => {
+    try {
+      const response = await fetch('http://localhost:8000/api/strategy/stop', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          account_id: accountId,
+          instance_id: instanceId,
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`停止失败: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      if (result.success) {
+        toast({
+          title: "策略停止成功",
+          description: result.message,
+        });
+        fetchRunningInstances(); // 刷新数据
+      } else {
+        throw new Error(result.message);
+      }
+    } catch (error) {
+      console.error('停止策略失败:', error);
+      toast({
+        title: "停止失败",
+        description: error.message || '未知错误',
+        variant: "destructive",
+      });
+    }
+  };
+
+  // 初始化和定期刷新数据
+  useEffect(() => {
+    fetchRunningInstances();
+    
+    const interval = setInterval(fetchRunningInstances, 30000); // 每30秒刷新
+    return () => clearInterval(interval);
+  }, []);
 
   // Update current time every second
   useEffect(() => {
@@ -273,7 +383,52 @@ export function CurrentRunning() {
     },
   ];
 
-  const [instances, setInstances] = useState(mockInstances);
+  // 直接使用API数据
+  const instances = apiInstances.map(apiInstance => ({
+    id: apiInstance.id,
+    platform: apiInstance.platform,
+    account: apiInstance.account,
+    strategy: apiInstance.strategy,
+    status: apiInstance.status,
+    owner: apiInstance.account, // 使用account作为owner
+    profit: apiInstance.profit || 0,
+    tradingPair: "BTC/USDT", // 默认交易对，API暂不支持
+    pid: Math.floor(Math.random() * 99999), // 模拟PID
+    createdAt: new Date().toLocaleString("zh-CN"),
+    runningTime: apiInstance.runtime || 0,
+    currentTime: currentTime.toLocaleString("zh-CN"),
+    positions: {
+      long: {
+        quantity: 0,
+        avgPrice: 0,
+        addCount: 0,
+        isLocked: false,
+        isMaxPosition: false,
+      },
+      short: {
+        quantity: 0,
+        avgPrice: 0,
+        addCount: 0,
+        isLocked: false,
+        isMaxPosition: false,
+      },
+    },
+    liquidationPrice: {
+      long: null,
+      short: null,
+    },
+    logs: [`策略 ${apiInstance.strategy} 运行中...`],
+    parameters: apiInstance.parameters || {
+      maxPosition: 50,
+      riskLevel: 50,
+      stopLoss: 8,
+      takeProfit: 15,
+      autoTrade: true,
+      notifications: true,
+      gridSpacing: 0.5,
+      maxGrids: 20,
+    },
+  }));
 
   const owners = [
     "all",
@@ -329,23 +484,33 @@ export function CurrentRunning() {
     instanceId: string,
     newParameters: InstanceParameters,
   ) => {
-    setInstances((prev) =>
-      prev.map((instance) =>
-        instance.id === instanceId
-          ? { ...instance, parameters: newParameters }
-          : instance,
-      ),
-    );
+    // 对于API实例，这里应该调用更新参数的API
+    console.log('更新参数:', instanceId, newParameters);
+    // 暂时不支持API参数更新，记录待实现功能
   };
 
   const handleDeleteInstance = (instanceId: string) => {
-    setInstances((prev) =>
-      prev.filter((instance) => instance.id !== instanceId),
-    );
+    // 对于API实例，调用停止策略API
+    const instance = instances.find(i => i.id === instanceId);
+    if (instance && apiInstances.length > 0) {
+      stopStrategy(instance.account, instanceId);
+    }
   };
 
   return (
     <div className="space-y-4 md:space-y-6">
+      {/* 加载状态和错误显示 */}
+      {isLoading && (
+        <div className="text-center text-muted-foreground py-4">
+          正在加载运行实例...
+        </div>
+      )}
+      {apiError && (
+        <div className="text-sm text-amber-600 bg-amber-50 p-3 rounded border">
+          ⚠️ {apiError}
+        </div>
+      )}
+      
       {/* Owner Filter and Add Button */}
       <div className="flex items-center justify-between gap-2 md:gap-4">
         <div className="flex items-center gap-2 md:gap-4">
@@ -508,6 +673,28 @@ export function CurrentRunning() {
       </div>
 
       {/* Running Instances */}
+      {filteredInstances.length === 0 ? (
+        <Card>
+          <CardContent className="text-center py-12">
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center">
+                <Activity className="w-8 h-8 text-muted-foreground" />
+              </div>
+              <div>
+                <h3 className="text-lg font-medium">暂无运行实例</h3>
+                <p className="text-muted-foreground mt-1">
+                  {isLoading 
+                    ? "正在加载运行实例..." 
+                    : apiError 
+                    ? "无法连接到API服务器" 
+                    : "当前没有策略在运行，点击上方按钮添加新的交易实例"
+                  }
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
       <div className="space-y-3 md:space-y-4">
         {filteredInstances.map((instance) => (
           <Card
@@ -1028,6 +1215,7 @@ export function CurrentRunning() {
           </CardContent>
         </Card>
       </div>
+      )}
 
       {/* Instance Settings Dialog */}
       {settingsInstance && (

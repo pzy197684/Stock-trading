@@ -29,6 +29,64 @@ export function ConsoleTools() {
     
     const cmd = command.toLowerCase().trim();
     
+    // 尝试从API获取系统信息
+    if (cmd === 'status') {
+      fetch('http://localhost:8000/health')
+        .then(response => response.json())
+        .then(data => {
+          const apiOutput = [
+            ...newOutput,
+            `系统状态: ${data.status}`,
+            `API时间: ${data.timestamp}`,
+            `缺失功能数: ${data.missing_features}`
+          ];
+          setConsoleOutput(apiOutput);
+        })
+        .catch(() => {
+          setConsoleOutput([...newOutput, "系统状态: API连接失败", "活跃实例: 无法获取", "总盈亏: 无法获取"]);
+        });
+      return;
+    }
+    
+    if (cmd === 'accounts') {
+      fetch('http://localhost:8000/api/dashboard/summary')
+        .then(response => response.json())
+        .then(data => {
+          const apiOutput = [
+            ...newOutput,
+            "账户列表:",
+            ...data.accounts.map((account: any, index: number) => 
+              `  ${index + 1}. ${account.platform}-${account.id} (${account.status})`
+            )
+          ];
+          setConsoleOutput(apiOutput);
+        })
+        .catch(() => {
+          setConsoleOutput([...newOutput, "账户列表:", "  API连接失败，无法获取账户信息"]);
+        });
+      return;
+    }
+    
+    if (cmd === 'strategies') {
+      fetch('http://localhost:8000/api/strategies/available')
+        .then(response => response.json())
+        .then(data => {
+          const apiOutput = [
+            ...newOutput,
+            "可用策略:",
+            ...data.strategies.map((strategy: any) => 
+              `  - ${strategy.name} (v${strategy.version})`
+            )
+          ];
+          setConsoleOutput(apiOutput);
+        })
+        .catch(() => {
+          setConsoleOutput([...newOutput, "可用策略:", "  API连接失败，无法获取策略信息"]);
+        });
+      return;
+    }
+    
+    // 原有的本地命令处理逻辑
     if (cmd === 'help') {
       newOutput.push("可用命令:");
       newOutput.push("  help           - 显示此帮助信息");

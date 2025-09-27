@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Progress } from "./ui/progress";
@@ -21,105 +22,101 @@ interface Strategy {
 }
 
 export function StrategyPanel() {
-  const strategies: Strategy[] = [
-    {
-      id: "grid",
-      name: "网格策略",
-      description: "在预设价格区间内设置买卖网格，适用于横盘震荡市场。通过低买高卖获得价差收益，同时支持多空双向网格交易。",
-      category: "震荡策略",
-      riskLevel: "low",
-      profitability: 75,
-      complexity: 60,
-      marketCondition: ["横盘震荡", "低波动率"],
-      features: ["双向交易", "自动止盈", "风险控制", "资金管理"],
-      performance: {
-        winRate: 78.5,
-        avgProfit: 2.3,
-        maxDrawdown: 8.2
-      }
-    },
-    {
-      id: "arbitrage",
-      name: "套利策略",
-      description: "利用不同交易所或交易对之间的价格差异进行套利交易。实时监控多个市场，发现套利机会时自动执行交易。",
-      category: "套利策略",
-      riskLevel: "medium",
-      profitability: 85,
-      complexity: 80,
-      marketCondition: ["价格差异", "高流动性"],
-      features: ["跨平台交易", "实时监控", "自动执行", "风险对冲"],
-      performance: {
-        winRate: 92.1,
-        avgProfit: 1.8,
-        maxDrawdown: 3.5
-      }
-    },
-    {
-      id: "trend",
-      name: "趋势跟踪策略",
-      description: "基于技术分析指标识别市场趋势，在趋势确立后进入市场，在趋势反转时退出。适用于单边行情市场。",
-      category: "趋势策略",
-      riskLevel: "high",
-      profitability: 90,
-      complexity: 70,
-      marketCondition: ["单边趋势", "高波动率"],
-      features: ["趋势识别", "动态止损", "仓位管理", "信号过滤"],
-      performance: {
-        winRate: 65.3,
-        avgProfit: 4.7,
-        maxDrawdown: 15.6
-      }
-    },
-    {
-      id: "scalping",
-      name: "高频scalp策略",
-      description: "通过大量小额快速交易获利，利用市场微小价格波动进行超短线交易。要求极低延迟和高频率执行。",
-      category: "高频策略",
-      riskLevel: "medium",
-      profitability: 70,
-      complexity: 95,
-      marketCondition: ["高流动性", "微小波动"],
-      features: ["高频交易", "低延迟", "快速执行", "风险分散"],
-      performance: {
-        winRate: 89.7,
-        avgProfit: 0.8,
-        maxDrawdown: 5.1
-      }
-    },
-    {
-      id: "martingale",
-      name: "马丁格尔策略",
-      description: "在亏损时加倍投注的策略，适用于有强势反弹预期的市场。需要充足资金和严格的风险控制措施。",
-      category: "资金管理",
-      riskLevel: "high",
-      profitability: 60,
-      complexity: 50,
-      marketCondition: ["强支撑位", "反弹预期"],
-      features: ["加倍投注", "风险放大", "高资金要求", "快速回本"],
-      performance: {
-        winRate: 45.2,
-        avgProfit: 8.9,
-        maxDrawdown: 35.7
-      }
-    },
-    {
-      id: "mean_reversion",
-      name: "均值回归策略",
-      description: "基于价格会回归其历史均值的理论，在价格偏离均值时进行反向交易。适用于波动性较大但总体稳定的市场。",
-      category: "统计策略",
-      riskLevel: "medium",
-      profitability: 80,
-      complexity: 75,
-      marketCondition: ["均值回归", "稳定波动"],
-      features: ["统计分析", "均值计算", "偏差检测", "回归交易"],
-      performance: {
-        winRate: 71.8,
-        avgProfit: 3.2,
-        maxDrawdown: 12.4
-      }
-    }
-  ];
+  // API数据状态
+  const [apiStrategies, setApiStrategies] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
 
+  // 从API获取策略列表
+  const fetchStrategies = async () => {
+    try {
+      setIsLoading(true);
+      setApiError(null);
+      const response = await fetch('http://localhost:8000/api/strategies/available');
+      if (!response.ok) {
+        throw new Error(`API错误: ${response.status}`);
+      }
+      const data = await response.json();
+      setApiStrategies(data.strategies || []);
+    } catch (error) {
+      console.error('获取策略列表失败:', error);
+      setApiError('无法连接到API服务器');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 初始化数据
+  useEffect(() => {
+    fetchStrategies();
+  }, []);
+
+  // 直接使用API数据
+  const displayStrategies = apiStrategies.map((apiStrategy: any) => ({
+    id: apiStrategy.id,
+    name: apiStrategy.name,
+    description: apiStrategy.description || "暂无描述",
+    category: mapCategory(apiStrategy.category),
+    riskLevel: apiStrategy.risk_level as 'low' | 'medium' | 'high',
+    profitability: calculateProfitability(apiStrategy.performance_metrics),
+    complexity: calculateComplexity(apiStrategy.param_schema),
+    marketCondition: extractMarketConditions(apiStrategy.performance_metrics),
+    features: extractFeatures(apiStrategy.capabilities, apiStrategy.default_params),
+    performance: {
+      winRate: parseFloat(apiStrategy.performance_metrics?.win_rate?.replace('%', '') || '0'),
+      avgProfit: parseFloat(apiStrategy.performance_metrics?.expected_return?.replace('%', '') || '0'),
+      maxDrawdown: parseFloat(apiStrategy.performance_metrics?.expected_drawdown?.split('-')[1]?.replace('%', '') || '0')
+    }
+  }));
+
+  // Helper functions to transform API data
+  function mapCategory(category: string): string {
+    const categoryMap: { [key: string]: string } = {
+      'grid_trading': '网格策略',
+      'arbitrage': '套利策略', 
+      'trend_following': '趋势策略',
+      'scalping': '高频策略',
+      'martingale': '资金管理',
+      'mean_reversion': '统计策略'
+    };
+    return categoryMap[category] || '其他策略';
+  }
+
+  function calculateProfitability(metrics: any): number {
+    if (!metrics) return 50;
+    // Base calculation on capital requirement and market suitability
+    const capitalReq = metrics.capital_requirement;
+    if (capitalReq === 'low') return 85;
+    if (capitalReq === 'medium') return 70;
+    if (capitalReq === 'high') return 60;
+    return 50;
+  }
+
+  function calculateComplexity(schema: any): number {
+    if (!schema?.properties) return 50;
+    const paramCount = Object.keys(schema.properties).length;
+    return Math.min(95, 30 + paramCount * 8); // More params = more complex
+  }
+
+  function extractMarketConditions(metrics: any): string[] {
+    if (!metrics) return ['通用市场'];
+    const conditions = [];
+    if (metrics.suitable_market) {
+      conditions.push(metrics.suitable_market);
+    }
+    return conditions.length > 0 ? conditions : ['通用市场'];
+  }
+
+  function extractFeatures(capabilities: any, params: any): string[] {
+    const features = [];
+    if (params?.hedge_enabled) features.push('对冲交易');
+    if (params?.auto_restart) features.push('自动重启');
+    if (params?.stop_loss_ratio) features.push('止损保护');
+    if (params?.take_profit_ratio) features.push('自动止盈');
+    if (params?.grid_gap) features.push('网格交易');
+    if (params?.max_position_size) features.push('仓位控制');
+    return features.length > 0 ? features : ['基础交易'];
+  }
   const getRiskBadge = (risk: string) => {
     switch (risk) {
       case 'low':
@@ -154,12 +151,37 @@ export function StrategyPanel() {
 
   return (
     <div className="space-y-6">
+      {/* 加载状态和错误显示 */}
+      {isLoading && (
+        <div className="text-center text-muted-foreground py-4">
+          正在加载策略列表...
+        </div>
+      )}
+      {apiError && (
+        <div className="text-sm text-amber-600 bg-amber-50 p-3 rounded border">
+          ⚠️ {apiError}
+        </div>
+      )}
+      
       <div className="text-sm text-muted-foreground">
-        当前系统共有 {strategies.length} 个策略可用，涵盖多种市场条件和风险偏好。
+        当前系统共有 {displayStrategies.length} 个策略可用，涵盖多种市场条件和风险偏好。
+        {apiStrategies.length > 0 && (
+          <div className="mt-2 space-y-1">
+            <div>API策略: {apiStrategies.map((s: any) => s.name || s.id).join(', ')}</div>
+            <div>支持的平台: {[...new Set(apiStrategies.flatMap((s: any) => s.supported_platforms || []))].join(', ')}</div>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-6">
-        {strategies.map((strategy) => (
+        {displayStrategies.length === 0 ? (
+          <div className="text-center py-12">
+            <div className="text-muted-foreground">
+              {isLoading ? "正在加载策略..." : "暂无可用策略"}
+            </div>
+          </div>
+        ) : (
+          displayStrategies.map((strategy) => (
           <Card key={strategy.id} className="w-full">
             <CardHeader>
               <div className="flex items-start justify-between">
@@ -244,7 +266,7 @@ export function StrategyPanel() {
               </div>
             </CardContent>
           </Card>
-        ))}
+        )))}
       </div>
     </div>
   );
