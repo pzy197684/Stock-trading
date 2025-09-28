@@ -1,0 +1,28 @@
+{
+  "account_id": "DEMO_BN001",
+  "display_name": "演示账号 - 币安001",
+  "platform": "binance",
+  "description": "这是一个演示账号，用于展示系统功能",
+  "api_credentials": {
+    "api_key": "demo_api_key_binance_12345",
+    "api_secret": "demo_secret_key_binance_67890",
+    "extra_params": {
+      "testnet": true,
+      "recv_window": 5000
+    }
+  },
+  "trading_settings": {
+    "max_position_size": 1000.0,
+    "risk_level": "low",
+    "stop_loss_percentage": 5.0,
+    "take_profit_percentage": 10.0,
+    "auto_trade_enabled": false
+  },
+  "notification_settings": {
+    "email_enabled": false,
+    "webhook_enabled": false
+  },
+  "created_at": "2025-09-28T00:00:00Z",
+  "last_modified": "2025-09-28T00:00:00Z",
+  "status": "demo"
+}

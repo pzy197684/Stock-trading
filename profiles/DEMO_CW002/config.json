@@ -1,0 +1,28 @@
+{
+  "account_id": "DEMO_CW002",
+  "display_name": "演示账号 - CoinW002",
+  "platform": "coinw",
+  "description": "这是一个CoinW演示账号，用于展示系统功能",
+  "api_credentials": {
+    "api_key": "demo_api_key_coinw_54321",
+    "api_secret": "demo_secret_key_coinw_09876",
+    "extra_params": {
+      "testnet": true,
+      "recv_window": 5000
+    }
+  },
+  "trading_settings": {
+    "max_position_size": 500.0,
+    "risk_level": "medium",
+    "stop_loss_percentage": 8.0,
+    "take_profit_percentage": 15.0,
+    "auto_trade_enabled": true
+  },
+  "notification_settings": {
+    "email_enabled": true,
+    "webhook_enabled": false
+  },
+  "created_at": "2025-09-28T00:00:00Z",
+  "last_modified": "2025-09-28T00:00:00Z",
+  "status": "demo"
+}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -106,6 +106,35 @@ interface TradingInstance {
   parameters: InstanceParameters;
 }
 
+interface CreateForm {
+  platform: string;
+  account: string;
+  strategy: string;
+  symbol: string;
+}
+
+interface PlatformInfo {
+  id: string;
+  name: string;
+}
+
+interface SymbolInfo {
+  symbol: string;
+  name: string;
+}
+
+interface AccountInfo {
+  id: string;
+  name: string;
+  platform: string;
+  status: string;
+}
+
+interface StrategyInfo {
+  id: string;
+  name: string;
+}
+
 export function CurrentRunning() {
   const [selectedOwner, setSelectedOwner] =
     useState<string>("all");
@@ -122,6 +151,19 @@ export function CurrentRunning() {
   const [apiInstances, setApiInstances] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
+  
+  // 创建实例相关状态
+  const [availablePlatforms, setAvailablePlatforms] = useState<PlatformInfo[]>([]);
+  const [availableStrategies, setAvailableStrategies] = useState<StrategyInfo[]>([]);
+  const [availableAccounts, setAvailableAccounts] = useState<AccountInfo[]>([]);
+  const [availableSymbols, setAvailableSymbols] = useState<SymbolInfo[]>([]);
+  const [createForm, setCreateForm] = useState<CreateForm>({
+    platform: '',
+    account: '',
+    strategy: '',
+    symbol: 'ETHUSDT'
+  });
+  const [isCreating, setIsCreating] = useState(false);
   
   const { toast } = useToast();
 
@@ -141,6 +183,162 @@ export function CurrentRunning() {
       setApiError('无法连接到API服务器');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // 获取可用平台
+  const fetchAvailablePlatforms = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/platforms/available');
+      if (!response.ok) throw new Error('获取平台列表失败');
+      const data = await response.json();
+      setAvailablePlatforms(data.platforms || []);
+    } catch (error) {
+      console.error('获取平台列表失败:', error);
+    }
+  };
+
+  // 获取可用策略
+  const fetchAvailableStrategies = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/strategies/available');
+      if (!response.ok) throw new Error('获取策略列表失败');
+      const data = await response.json();
+      setAvailableStrategies(data.strategies || []);
+    } catch (error) {
+      console.error('获取策略列表失败:', error);
+    }
+  };
+
+  // 获取可用交易对
+  const fetchAvailableSymbols = async (selectedPlatform?: string) => {
+    try {
+      const params = selectedPlatform ? `?platform=${selectedPlatform}` : '';
+      const response = await fetch(`http://localhost:8000/api/symbols/available${params}`);
+      if (!response.ok) throw new Error('获取交易对列表失败');
+      const data = await response.json();
+      setAvailableSymbols(data.symbols || []);
+    } catch (error) {
+      console.error('获取交易对列表失败:', error);
+    }
+  };
+
+  // 获取可用账号（支持平台筛选）
+  const fetchAvailableAccounts = async (selectedPlatform?: string) => {
+    try {
+      const params = selectedPlatform ? `?platform=${selectedPlatform}` : '';
+      const response = await fetch(`http://localhost:8000/api/accounts/available${params}`);
+      if (!response.ok) throw new Error('获取账号列表失败');
+      const data = await response.json();
+      setAvailableAccounts(data.accounts || []);
+    } catch (error) {
+      console.error('获取账号列表失败:', error);
+    }
+  };
+
+  // 测试账号连接
+  const testAccountConnection = async (accountId: string) => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/accounts/${accountId}/test-connection`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error(`连接测试失败: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        toast({
+          type: "success",
+          title: "连接成功",
+          description: `账号 ${accountId} 连接到 ${result.platform} 成功！`,
+        });
+      } else {
+        toast({
+          type: "error",
+          title: "连接失败",
+          description: result.message || `账号 ${accountId} 连接失败`,
+        });
+      }
+      
+      return result;
+    } catch (error: any) {
+      toast({
+        title: "连接错误", 
+        description: error.message || '未知错误',
+        variant: "destructive",
+      });
+      return { success: false, message: error.message };
+    }
+  };
+
+  // 创建新实例
+  const createInstance = async () => {
+    if (!createForm.platform || !createForm.account || !createForm.strategy || !createForm.symbol) {
+      toast({
+        title: "参数不完整",
+        description: "请填写所有必需字段",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsCreating(true);
+    try {
+      const response = await fetch('http://localhost:8000/api/instances/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          account_id: createForm.account,
+          platform: createForm.platform,
+          strategy: createForm.strategy,
+          symbol: createForm.symbol,
+          parameters: {
+            symbol: createForm.symbol
+          }
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `创建失败: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      if (result.success) {
+        toast({
+          type: "success",
+          title: "实例创建成功",
+          description: `策略 ${result.strategy} 实例已创建`,
+        });
+        setShowCreateDialog(false);
+        // 重置表单
+        setCreateForm({
+          platform: '',
+          account: '',
+          strategy: '',
+          symbol: 'ETHUSDT'
+        });
+        fetchRunningInstances(); // 刷新数据
+      } else {
+        throw new Error(result.message || '创建失败');
+      }
+    } catch (error: any) {
+      console.error('创建实例失败:', error);
+      toast({
+        title: "创建失败", 
+        description: error.message || '未知错误',
+        variant: "destructive",
+      });
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -166,6 +364,7 @@ export function CurrentRunning() {
       const result = await response.json();
       if (result.success) {
         toast({
+          type: "success",
           title: "策略启动成功",
           description: result.message,
         });
@@ -173,12 +372,12 @@ export function CurrentRunning() {
       } else {
         throw new Error(result.message);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('启动策略失败:', error);
       toast({
+        type: "error",
         title: "启动失败",
         description: error.message || '未知错误',
-        variant: "destructive",
       });
     }
   };
@@ -204,6 +403,7 @@ export function CurrentRunning() {
       const result = await response.json();
       if (result.success) {
         toast({
+          type: "success",
           title: "策略停止成功",
           description: result.message,
         });
@@ -214,9 +414,9 @@ export function CurrentRunning() {
     } catch (error) {
       console.error('停止策略失败:', error);
       toast({
+        type: "error",
         title: "停止失败",
-        description: error.message || '未知错误',
-        variant: "destructive",
+        description: (error as Error).message || '未知错误',
       });
     }
   };
@@ -224,6 +424,9 @@ export function CurrentRunning() {
   // 初始化和定期刷新数据
   useEffect(() => {
     fetchRunningInstances();
+    fetchAvailablePlatforms();
+    fetchAvailableStrategies();
+    // 不再默认加载账号和交易对，等待用户选择平台
     
     const interval = setInterval(fetchRunningInstances, 30000); // 每30秒刷新
     return () => clearInterval(interval);
@@ -236,152 +439,6 @@ export function CurrentRunning() {
     }, 1000);
     return () => clearInterval(timer);
   }, []);
-
-  const mockInstances: TradingInstance[] = [
-    {
-      id: "1",
-      platform: "币安",
-      account: "账户A",
-      strategy: "网格策略",
-      status: "running",
-      owner: "张三",
-      profit: 1250.5,
-      tradingPair: "BTC/USDT",
-      pid: 12345,
-      createdAt: "2024-09-19 10:30:00",
-      runningTime: 285, // 4小时45分钟
-      currentTime: currentTime.toLocaleString("zh-CN"),
-      positions: {
-        long: {
-          quantity: 0.15,
-          avgPrice: 67500,
-          addCount: 3,
-          isLocked: false,
-          isMaxPosition: false,
-        },
-        short: {
-          quantity: 0.08,
-          avgPrice: 68200,
-          addCount: 2,
-          isLocked: false,
-          isMaxPosition: false,
-        },
-      },
-      liquidationPrice: {
-        long: 65000,
-        short: 70500,
-      },
-      logs: [
-        "14:30 开启网格交易",
-        "14:35 买入订单执行",
-        "14:40 卖出订单执行",
-      ],
-      parameters: {
-        maxPosition: 50,
-        riskLevel: 50,
-        stopLoss: 8,
-        takeProfit: 15,
-        autoTrade: true,
-        notifications: true,
-        gridSpacing: 0.5,
-        maxGrids: 20,
-      },
-    },
-    {
-      id: "2",
-      platform: "火币",
-      account: "账户B",
-      strategy: "套利策略",
-      status: "running",
-      owner: "李四",
-      profit: -320.8,
-      tradingPair: "ETH/USDT",
-      pid: 12346,
-      createdAt: "2024-09-19 12:00:00",
-      runningTime: 135, // 2小时15分钟
-      currentTime: currentTime.toLocaleString("zh-CN"),
-      positions: {
-        long: {
-          quantity: 2.5,
-          avgPrice: 2650,
-          addCount: 1,
-          isLocked: false,
-          isMaxPosition: true,
-        },
-        short: {
-          quantity: 4.2,
-          avgPrice: 2680,
-          addCount: 4,
-          isLocked: true,
-          isMaxPosition: false,
-        },
-      },
-      liquidationPrice: {
-        long: 2400,
-        short: 2850,
-      },
-      logs: [
-        "14:25 检测到套利机会",
-        "14:30 执行套利订单",
-        "14:38 套利完成",
-      ],
-      parameters: {
-        maxPosition: 80,
-        riskLevel: 80,
-        stopLoss: 12,
-        takeProfit: 25,
-        autoTrade: true,
-        notifications: false,
-        gridSpacing: 0.3,
-        maxGrids: 30,
-      },
-    },
-    {
-      id: "3",
-      platform: "OKEx",
-      account: "账户C",
-      strategy: "趋势跟踪",
-      status: "error",
-      owner: "张三",
-      profit: 0,
-      tradingPair: "SOL/USDT",
-      pid: 12347,
-      createdAt: "2024-09-19 14:20:00",
-      runningTime: 25, // 25分钟
-      currentTime: currentTime.toLocaleString("zh-CN"),
-      positions: {
-        long: {
-          quantity: 0,
-          avgPrice: 0,
-          addCount: 0,
-          isLocked: false,
-          isMaxPosition: false,
-        },
-        short: {
-          quantity: 0,
-          avgPrice: 0,
-          addCount: 0,
-          isLocked: false,
-          isMaxPosition: false,
-        },
-      },
-      liquidationPrice: {
-        long: null,
-        short: null,
-      },
-      logs: ["14:20 策略启动失败", "14:21 连接错误"],
-      parameters: {
-        maxPosition: 30,
-        riskLevel: 20,
-        stopLoss: 5,
-        takeProfit: 10,
-        autoTrade: false,
-        notifications: true,
-        gridSpacing: 1,
-        maxGrids: 10,
-      },
-    },
-  ];
 
   // 直接使用API数据
   const instances = apiInstances.map(apiInstance => ({
@@ -497,6 +554,80 @@ export function CurrentRunning() {
     }
   };
 
+  // 平台变更处理函数
+  const handlePlatformChange = async (platform: string) => {
+    setCreateForm(prev => ({
+      ...prev, 
+      platform, 
+      symbol: '', 
+      account: ''
+    }));
+    
+    // 加载该平台的交易对
+    try {
+      const symbolsResponse = await fetch(`http://localhost:8000/api/symbols/available?platform=${platform}`);
+      if (symbolsResponse.ok) {
+        const data = await symbolsResponse.json();
+        setAvailableSymbols(data.symbols || []);
+      } else {
+        setAvailableSymbols([]);
+      }
+    } catch (error) {
+      console.error('获取交易对失败:', error);
+      setAvailableSymbols([]);
+    }
+    
+    // 加载该平台的账号
+    try {
+      const accountsResponse = await fetch(`http://localhost:8000/api/accounts/available?platform=${platform}`);
+      if (accountsResponse.ok) {
+        const data = await accountsResponse.json();
+        setAvailableAccounts(data.accounts || []);
+      } else {
+        setAvailableAccounts([]);
+      }
+    } catch (error) {
+      console.error('获取账号失败:', error);
+      setAvailableAccounts([]);
+    }
+  };
+
+  // 账号变更处理函数
+  const handleAccountChange = async (accountId: string) => {
+    setCreateForm(prev => ({...prev, account: accountId}));
+    
+    // 测试账号连接
+    try {
+      const testResponse = await fetch(`http://localhost:8000/api/accounts/${accountId}/test-connection`, {
+        method: 'POST'
+      });
+      
+      if (testResponse.ok) {
+        const result = await testResponse.json();
+        if (result.connected) {
+          toast({
+            type: "success",
+            title: "账号连接成功",
+            description: `${result.account_name || accountId} 连接正常`,
+          });
+        } else {
+          toast({
+            type: "error",
+            title: "账号连接失败",
+            description: result.error || "无法连接到交易平台",
+          });
+        }
+      }
+    } catch (error) {
+      console.error('测试账号连接失败:', error);
+      toast({
+        type: "error",
+        title: "连接测试失败",
+        description: "无法测试账号连接",
+      });
+    }
+  };
+
   return (
     <div className="space-y-4 md:space-y-6">
       {/* 加载状态和错误显示 */}
@@ -540,14 +671,8 @@ export function CurrentRunning() {
           onOpenChange={setShowCreateDialog}
         >
           <DialogTrigger asChild>
-            <Button
-              onClick={() =>
-                toast({
-                  type: "info",
-                  title: "打开创建实例窗口",
-                })
-              }
-            >
+            {/* 添加新实例按钮 */}
+            <Button>
               <Plus className="w-4 h-4 mr-2" />
               <span className="hidden sm:inline">
                 添加新实例
@@ -567,81 +692,87 @@ export function CurrentRunning() {
             <div className="space-y-4 max-h-[60vh] md:max-h-96 overflow-y-auto pr-2 -mr-2">
               <div>
                 <label className="text-sm font-medium">
-                  交易平台
+                  交易平台 *
                 </label>
-                <Select>
+                <Select value={createForm.platform} onValueChange={handlePlatformChange}>
                   <SelectTrigger>
-                    <SelectValue placeholder="选择交易平台" />
+                    <SelectValue placeholder="请先选择交易平台" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="binance">
-                      币安
-                    </SelectItem>
-                    <SelectItem value="huobi">火币</SelectItem>
-                    <SelectItem value="okex">OKEx</SelectItem>
+                    {availablePlatforms.map((platform: PlatformInfo) => (
+                      <SelectItem key={platform.id} value={platform.id}>
+                        {platform.name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
               <div>
                 <label className="text-sm font-medium">
-                  交易对
+                  交易对 *
                 </label>
-                <Select>
+                <Select 
+                  value={createForm.symbol} 
+                  onValueChange={(value: string) => setCreateForm((prev: CreateForm) => ({...prev, symbol: value}))}
+                  disabled={!createForm.platform}
+                >
                   <SelectTrigger>
-                    <SelectValue placeholder="选择交易对" />
+                    <SelectValue placeholder={createForm.platform ? "选择交易对" : "请先选择平台"} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="BTCUSDT">
-                      BTC/USDT
-                    </SelectItem>
-                    <SelectItem value="ETHUSDT">
-                      ETH/USDT
-                    </SelectItem>
-                    <SelectItem value="SOLUSDT">
-                      SOL/USDT
-                    </SelectItem>
+                    {availableSymbols.map((symbol: SymbolInfo) => (
+                      <SelectItem key={symbol.symbol} value={symbol.symbol}>
+                        {symbol.name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
               <div>
                 <label className="text-sm font-medium">
-                  账号
+                  账号 *
                 </label>
-                <Select>
+                <Select 
+                  value={createForm.account} 
+                  onValueChange={handleAccountChange}
+                  disabled={!createForm.platform}
+                >
                   <SelectTrigger>
-                    <SelectValue placeholder="选择账号" />
+                    <SelectValue placeholder={createForm.platform ? "选择账号" : "请先选择平台"} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="account1">
-                      账户A
-                    </SelectItem>
-                    <SelectItem value="account2">
-                      账户B
-                    </SelectItem>
-                    <SelectItem value="account3">
-                      账户C
-                    </SelectItem>
+                    {availableAccounts.length > 0 && (
+                      availableAccounts.map((account: AccountInfo) => (
+                        <SelectItem key={account.id} value={account.id}>
+                          {account.name} ({account.platform || '未知平台'})
+                          <Badge variant="outline" className="ml-2 text-xs">
+                            {account.status}
+                          </Badge>
+                        </SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
+                {createForm.platform && availableAccounts.length === 0 && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    该平台暂无配置账号，请先在 profiles/ 目录下配置账号
+                  </p>
+                )}
               </div>
               <div>
                 <label className="text-sm font-medium">
                   交易策略
                 </label>
-                <Select>
+                <Select value={createForm.strategy} onValueChange={(value: string) => setCreateForm((prev: CreateForm) => ({...prev, strategy: value}))}>
                   <SelectTrigger>
                     <SelectValue placeholder="选择策略" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="grid">
-                      网格策略
-                    </SelectItem>
-                    <SelectItem value="arbitrage">
-                      套利策略
-                    </SelectItem>
-                    <SelectItem value="trend">
-                      趋势跟踪
-                    </SelectItem>
+                    {availableStrategies.map((strategy: StrategyInfo) => (
+                      <SelectItem key={strategy.id} value={strategy.id}>
+                        {strategy.name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -655,16 +786,10 @@ export function CurrentRunning() {
                   取消
                 </Button>
                 <Button
-                  onClick={() => {
-                    setShowCreateDialog(false);
-                    toast({
-                      type: "success",
-                      title: "实例创建成功",
-                      description: "新交易实例已启动",
-                    });
-                  }}
+                  onClick={createInstance}
+                  disabled={isCreating}
                 >
-                  创建实例
+                  {isCreating ? '创建中...' : '创建实例'}
                 </Button>
               </DialogFooter>
             </div>

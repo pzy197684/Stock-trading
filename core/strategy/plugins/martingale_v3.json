@@ -1,6 +1,6 @@
 {
     "name": "martingale_v3",
-    "display_name": "Martingale V3 Strategy",
+    "display_name": "马丁对冲策略",
     "description": "Advanced martingale strategy with risk management",
     "strategy_class": "core.strategy.martingale_v3.strategy:MartingaleV3Strategy",
     "version": "3.0.0",
