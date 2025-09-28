@@ -3,6 +3,7 @@
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from typing import Dict, List, Any, Optional
 import sys
 import os
@@ -64,6 +65,14 @@ class ConnectionManager:
                 pass
 
 manager = ConnectionManager()
+
+# Pydantic模型定义
+class CreateInstanceRequest(BaseModel):
+    account_id: str
+    platform: str  
+    strategy: str
+    symbol: str
+    parameters: Optional[Dict[str, Any]] = None
 
 # 缺失功能记录
 MISSING_FEATURES = []
@@ -624,59 +633,53 @@ async def get_available_strategies():
         return {"strategies": []}
 
 @app.post("/api/instances/create")
-async def create_instance(
-    account_id: str,
-    platform: str,
-    strategy: str,
-    symbol: str,
-    parameters: Optional[Dict[str, Any]] = None
-):
+async def create_instance(request: CreateInstanceRequest):
     """创建新的交易实例"""
     try:
         # 验证输入参数
-        if not all([account_id, platform, strategy, symbol]):
+        if not all([request.account_id, request.platform, request.strategy, request.symbol]):
             raise HTTPException(status_code=400, detail="缺少必需参数")
         
         # 验证平台是否支持
         available_platforms = platform_manager.get_available_platforms()
-        if platform not in available_platforms:
-            raise HTTPException(status_code=400, detail=f"不支持的平台: {platform}")
+        if request.platform not in available_platforms:
+            raise HTTPException(status_code=400, detail=f"不支持的平台: {request.platform}")
         
         # 验证策略是否存在
         available_strategies = strategy_manager.get_available_strategies()
-        if strategy not in available_strategies:
-            raise HTTPException(status_code=400, detail=f"策略不存在: {strategy}")
+        if request.strategy not in available_strategies:
+            raise HTTPException(status_code=400, detail=f"策略不存在: {request.strategy}")
         
         # 创建策略实例
-        final_params = parameters or {}
-        if symbol:
-            final_params['symbol'] = symbol
+        final_params = request.parameters or {}
+        if request.symbol:
+            final_params['symbol'] = request.symbol
             
         instance_id = strategy_manager.create_strategy_instance(
-            account=account_id,
-            strategy_name=strategy,
+            account=request.account_id,
+            strategy_name=request.strategy,
             params=final_params
         )
         
         # 广播更新
         await manager.broadcast({
             "type": "instance_created",
-            "account_id": account_id,
-            "platform": platform,
-            "strategy": strategy,
+            "account_id": request.account_id,
+            "platform": request.platform,
+            "strategy": request.strategy,
             "instance_id": instance_id,
             "timestamp": datetime.now().isoformat()
         })
         
-        logger.log_info(f"✅ Created instance {instance_id} for {account_id}/{strategy}")
+        logger.log_info(f"✅ Created instance {instance_id} for {request.account_id}/{request.strategy}")
         
         return {
             "success": True,
-            "message": f"实例 {strategy} 创建成功",
+            "message": f"实例 {request.strategy} 创建成功",
             "instance_id": instance_id,
-            "account_id": account_id,
-            "platform": platform,
-            "strategy": strategy
+            "account_id": request.account_id,
+            "platform": request.platform,
+            "strategy": request.strategy
         }
         
     except Exception as e:

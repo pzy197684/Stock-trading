@@ -269,21 +269,49 @@ export function CurrentRunning() {
       return result;
     } catch (error: any) {
       toast({
+        type: "error",
         title: "连接错误", 
         description: error.message || '未知错误',
-        variant: "destructive",
       });
       return { success: false, message: error.message };
     }
   };
 
+  // 重置创建表单
+  const resetCreateForm = () => {
+    setCreateForm({
+      platform: '',
+      account: '',
+      strategy: '',
+      symbol: ''
+    });
+    setAvailableSymbols([]);
+    setAvailableAccounts([]);
+  };
+
+  // 处理创建对话框状态变化
+  const handleCreateDialogChange = (open: boolean) => {
+    setShowCreateDialog(open);
+    if (open) {
+      // 对话框打开时重置表单
+      resetCreateForm();
+    }
+  };
+
   // 创建新实例
   const createInstance = async () => {
-    if (!createForm.platform || !createForm.account || !createForm.strategy || !createForm.symbol) {
+    // 详细的表单验证
+    const missingFields = [];
+    if (!createForm.platform) missingFields.push('交易平台');
+    if (!createForm.symbol) missingFields.push('交易对');
+    if (!createForm.account) missingFields.push('交易账号');
+    if (!createForm.strategy) missingFields.push('交易策略');
+
+    if (missingFields.length > 0) {
       toast({
+        type: "error",
         title: "参数不完整",
-        description: "请填写所有必需字段",
-        variant: "destructive",
+        description: `请选择：${missingFields.join('、')}`,
       });
       return;
     }
@@ -319,13 +347,8 @@ export function CurrentRunning() {
           description: `策略 ${result.strategy} 实例已创建`,
         });
         setShowCreateDialog(false);
-        // 重置表单
-        setCreateForm({
-          platform: '',
-          account: '',
-          strategy: '',
-          symbol: 'ETHUSDT'
-        });
+        // 重置表单和相关状态
+        resetCreateForm();
         fetchRunningInstances(); // 刷新数据
       } else {
         throw new Error(result.message || '创建失败');
@@ -333,9 +356,9 @@ export function CurrentRunning() {
     } catch (error: any) {
       console.error('创建实例失败:', error);
       toast({
+        type: "error",
         title: "创建失败", 
         description: error.message || '未知错误',
-        variant: "destructive",
       });
     } finally {
       setIsCreating(false);
@@ -668,7 +691,7 @@ export function CurrentRunning() {
 
         <Dialog
           open={showCreateDialog}
-          onOpenChange={setShowCreateDialog}
+          onOpenChange={handleCreateDialogChange}
         >
           <DialogTrigger asChild>
             {/* 添加新实例按钮 */}
@@ -787,7 +810,7 @@ export function CurrentRunning() {
                 </Button>
                 <Button
                   onClick={createInstance}
-                  disabled={isCreating}
+                  disabled={isCreating || !createForm.platform || !createForm.symbol || !createForm.account || !createForm.strategy}
                 >
                   {isCreating ? '创建中...' : '创建实例'}
                 </Button>
