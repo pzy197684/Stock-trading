@@ -1,0 +1,143 @@
+{
+  "name": "Binance马丁对冲策略示例",
+  "description": "从928项目移植的完整马丁对冲策略，适配Binance期货",
+  "version": "1.0.0",
+  
+  "account": {
+    "platform": "binance",
+    "account_name": "BN_MARTINGALE_001",
+    "api_credentials_path": "credentials/binance_api.json"
+  },
+  
+  "strategy": {
+    "name": "martingale_hedge",
+    "class": "MartingaleHedgeStrategy",
+    "module": "core.strategy.martingale_hedge.strategy",
+    
+    "params": {
+      "symbol": "ETHUSDT",
+      "order_type": "MARKET",
+      "interval": 5,
+      
+      "long": {
+        "first_qty": 0.01,
+        "add_ratio": 2.0,
+        "add_interval": 0.02,
+        "max_add_times": 3,
+        "tp_first_order": 0.01,
+        "tp_before_full": 0.015,
+        "tp_after_full": 0.02
+      },
+      
+      "short": {
+        "first_qty": 0.01,
+        "add_ratio": 2.0,
+        "add_interval": 0.02,
+        "max_add_times": 3,
+        "tp_first_order": 0.01,
+        "tp_before_full": 0.015,
+        "tp_after_full": 0.02
+      },
+      
+      "hedge": {
+        "trigger_loss": 0.05,
+        "equal_eps": 0.01,
+        "min_wait_seconds": 60,
+        "release_tp_after_full": {
+          "long": 0.02,
+          "short": 0.02
+        },
+        "release_sl_loss_ratio": {
+          "long": 1.0,
+          "short": 1.0
+        }
+      },
+      
+      "risk_control": {
+        "tp_slippage": 0.002,
+        "max_total_qty": 0.1,
+        "cooldown_minutes": 1,
+        "fast_add_window": 300
+      }
+    }
+  },
+  
+  "executor": {
+    "class": "MartingaleHedgeExecutor",
+    "module": "core.strategy.martingale_hedge.executor",
+    
+    "settings": {
+      "order_timeout": 30,
+      "confirmation_timeout": 3,
+      "retry_count": 2,
+      "enable_partial_fill": true
+    }
+  },
+  
+  "platform_config": {
+    "binance": {
+      "base_url": "https://fapi.binance.com",
+      "testnet": false,
+      "position_mode": "hedge",
+      "margin_type": "isolated",
+      "leverage": 1,
+      
+      "adapter": {
+        "class": "BinanceMartingaleAdapter", 
+        "module": "core.strategy.martingale_hedge.adapters.binance"
+      }
+    }
+  },
+  
+  "logging": {
+    "level": "INFO",
+    "enable_trade_log": true,
+    "enable_state_log": true,
+    "log_file": "logs/martingale_hedge_{date}.log",
+    "csv_file": "logs/trades_{date}.csv"
+  },
+  
+  "monitoring": {
+    "enable_metrics": true,
+    "state_backup_interval": 60,
+    "health_check_interval": 30,
+    "alert_on_error": true,
+    "alert_webhook": ""
+  },
+  
+  "state_management": {
+    "persistence": true,
+    "state_file": "state/martingale_hedge_state.json",
+    "backup_count": 10,
+    "auto_recovery": true
+  },
+  
+  "comments": {
+    "strategy_explanation": "马丁对冲策略移植说明",
+    "core_logic": [
+      "1. 双开起步：多空各按first_qty开仓",
+      "2. 动态加仓：偏离达到add_interval时按add_ratio倍数加仓", 
+      "3. 分级止盈：首仓独立止盈，均价止盈分满仓前后",
+      "4. 对冲锁仓：浮亏达到trigger_loss时触发锁仓",
+      "5. 解锁止盈：锁仓后盈利侧先释放",
+      "6. 解锁止损：亏损侧保护释放",
+      "7. 重开机制：无仓位时重新开始循环"
+    ],
+    "risk_warnings": [
+      "马丁策略存在连续亏损风险，需要充足资金",
+      "对冲锁仓会占用较多保证金", 
+      "建议在波动较大的市场中使用",
+      "请合理设置仓位大小和风控参数",
+      "建议先在模拟环境测试"
+    ],
+    "parameter_explanation": {
+      "first_qty": "首仓数量，建议根据账户资金设置", 
+      "add_ratio": "加仓倍数，2.0表示每次加仓量翻倍",
+      "add_interval": "加仓间距，0.02表示价格偏离2%时加仓",
+      "max_add_times": "最大加仓次数，控制风险暴露",
+      "trigger_loss": "锁仓触发阈值，0.05表示浮亏5%时锁仓",
+      "equal_eps": "仓位平衡容差，避免微小差异重复对冲",
+      "tp_slippage": "止盈滑点保护，避免价格跳动误触发"
+    }
+  }
+}

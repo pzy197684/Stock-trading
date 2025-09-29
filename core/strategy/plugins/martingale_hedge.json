@@ -1,0 +1,127 @@
+{
+  "name": "martingale_hedge",
+  "version": "1.0.0",
+  "description": "马丁对冲策略 - 从928项目移植的完整交易逻辑",
+  "author": "从928项目移植",
+  "strategy_class": "MartingaleHedgeStrategy",
+  "strategy_module": "core.strategy.martingale_hedge.strategy",
+  "executor_class": "MartingaleHedgeExecutor", 
+  "executor_module": "core.strategy.martingale_hedge.executor",
+  
+  "supported_platforms": [
+    "binance"
+  ],
+  
+  "platform_adapters": {
+    "binance": {
+      "adapter_class": "BinanceMartingaleAdapter",
+      "adapter_module": "core.strategy.martingale_hedge.adapters.binance"
+    }
+  },
+  
+  "required_capabilities": [
+    "hedge_support",
+    "position_mode_both",
+    "market_orders",
+    "position_query"
+  ],
+  
+  "default_config": {
+    "symbol": "ETHUSDT",
+    "order_type": "MARKET",
+    "interval": 5,
+    
+    "long": {
+      "first_qty": 0.01,
+      "add_ratio": 2.0,
+      "add_interval": 0.02,
+      "max_add_times": 3,
+      "tp_first_order": 0.01,
+      "tp_before_full": 0.015,
+      "tp_after_full": 0.02
+    },
+    
+    "short": {
+      "first_qty": 0.01,
+      "add_ratio": 2.0,
+      "add_interval": 0.02,
+      "max_add_times": 3,
+      "tp_first_order": 0.01,
+      "tp_before_full": 0.015,
+      "tp_after_full": 0.02
+    },
+    
+    "hedge": {
+      "trigger_loss": 0.05,
+      "equal_eps": 0.01,
+      "min_wait_seconds": 60,
+      "release_tp_after_full": {
+        "long": 0.02,
+        "short": 0.02
+      },
+      "release_sl_loss_ratio": {
+        "long": 1.0,
+        "short": 1.0
+      }
+    },
+    
+    "risk_control": {
+      "tp_slippage": 0.002,
+      "max_total_qty": 1.0,
+      "cooldown_minutes": 1,
+      "fast_add_window": 300
+    }
+  },
+  
+  "validation_rules": {
+    "required_fields": [
+      "symbol",
+      "long",
+      "short", 
+      "hedge"
+    ],
+    "numeric_ranges": {
+      "long.first_qty": [0.001, 100.0],
+      "short.first_qty": [0.001, 100.0],
+      "long.add_ratio": [1.0, 10.0],
+      "short.add_ratio": [1.0, 10.0],
+      "long.add_interval": [0.001, 0.5],
+      "short.add_interval": [0.001, 0.5],
+      "hedge.trigger_loss": [0.01, 0.3],
+      "hedge.equal_eps": [0.0001, 0.1]
+    }
+  },
+  
+  "features": [
+    "双向开仓",
+    "动态加仓", 
+    "分级止盈",
+    "对冲锁仓",
+    "解锁机制",
+    "风控保护",
+    "状态持久化",
+    "异常恢复"
+  ],
+  
+  "risk_warnings": [
+    "马丁策略存在连续亏损风险",
+    "对冲锁仓会占用较多保证金", 
+    "需要充足的账户资金",
+    "建议在波动较大的市场中使用",
+    "请合理设置仓位大小和风控参数"
+  ],
+  
+  "changelog": [
+    {
+      "version": "1.0.0",
+      "date": "2025-09-29", 
+      "changes": [
+        "从928项目完整移植马丁对冲策略逻辑",
+        "适配Stock-trading框架架构",
+        "支持Binance期货交易",
+        "实现完整的锁仓解锁机制",
+        "添加风控保护和异常处理"
+      ]
+    }
+  ]
+}
