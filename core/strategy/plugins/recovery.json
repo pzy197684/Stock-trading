@@ -1,0 +1,97 @@
+{
+  "name": "recovery",
+  "display_name": "解套策略",
+  "description": "针对被套持仓的马丁格尔解套策略，支持分层止盈和熔断保护",
+  "version": "1.0.0",
+  "author": "Stock Trading System",
+  "strategy_class": "core.strategy.recovery.strategy:RecoveryStrategy",
+  "supported_platforms": ["binance", "okx", "coinw"],
+  "supported_instruments": ["FUTURES"],
+  
+  "platform_adapters": {
+    "binance": {
+      "adapter_class": "core.strategy.recovery.adapters.binance:BinanceRecoveryAdapter"
+    }
+  },
+  
+  "required_capabilities": [
+    "market_orders",
+    "limit_orders",
+    "position_query",
+    "balance_query"
+  ],
+  "default_params": {
+    "symbol": "ETHUSDT",
+    "recovery": {
+      "mode": "long_trapped",
+      "cap_ratio": 0.75,
+      "ttl_seconds": 300,
+      "use_limit_tp": true,
+      "grid": {
+        "add_interval_pct": 0.04,
+        "tp_first_order_pct": 0.01,
+        "tp_before_full_pct": 0.02,
+        "tp_after_full_pct": 0.01,
+        "tp_reprice_tol_ratio": 0.001,
+        "martingale": {
+          "first_qty": 50.0,
+          "multiplier": 2.0,
+          "max_add_times": 4
+        }
+      },
+      "confirm": {
+        "kline": "15m",
+        "filters": {
+          "body_min_frac_of_interval": 0.25,
+          "wick_to_body_max": 2.0,
+          "followthrough_window_min": 15
+        }
+      },
+      "circuit_breakers": {
+        "jump": {
+          "enabled": true,
+          "window_minutes": 30,
+          "factor_vs_interval": 2.0,
+          "pause_minutes": 15
+        },
+        "atr": {
+          "enabled": true,
+          "tf": "1h",
+          "factor_vs_interval": 3.0,
+          "pause_hours": 24
+        }
+      }
+    }
+  },
+  "param_schema": {
+    "type": "object",
+    "required": ["symbol", "recovery"],
+    "properties": {
+      "symbol": {
+        "type": "string",
+        "description": "交易对符号",
+        "default": "ETHUSDT"
+      },
+      "recovery": {
+        "type": "object",
+        "description": "解套策略主配置",
+        "required": ["mode", "cap_ratio", "grid"],
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["long_trapped", "short_trapped"],
+            "description": "被套模式",
+            "default": "long_trapped"
+          },
+          "cap_ratio": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 1.0,
+            "description": "容量比例",
+            "default": 0.75
+          }
+        }
+      }
+    }
+  }
+}

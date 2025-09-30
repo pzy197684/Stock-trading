@@ -1,0 +1,89 @@
+{
+  "_comment": "DC1001 DEEPCOIN解套策略配置（从929迁移�?,
+  "_derived_from": "profiles/_shared_defaults/strategies/recovery.defaults.json",
+  "_migration_source": "929/profiles/DEEPCOIN/DC1001/config.json",
+  "_status": "enabled",
+  
+  "strategy": {
+    "name": "recovery",
+    "version": "2.0.0",
+    "description": "解套策略 - DC1001�?29迁移"
+  },
+  
+  "symbol": "ORDIUSDT",
+  
+  "recovery": {
+    "mode": "long_trapped",
+    "cap_ratio": 0.75,
+    "ttl_seconds": 300,
+    "use_limit_tp": true,
+    
+    "grid": {
+      "add_interval_pct": 0.04,
+      "tp_first_order_pct": 0.01,
+      "tp_before_full_pct": 0.02,
+      "tp_after_full_pct": 0.01,
+      "tp_reprice_tol_ratio": 0.001,
+      
+      "martingale": {
+        "first_qty": 50.0,
+        "multiplier": 2.0,
+        "max_add_times": 4
+      }
+    },
+    
+    "confirm": {
+      "kline": "15m",
+      "filters": {
+        "body_min_frac_of_interval": 0.25,
+        "wick_to_body_max": 2.0,
+        "followthrough_window_min": 15
+      }
+    },
+    
+    "circuit_breakers": {
+      "jump": {
+        "enabled": false,
+        "window_minutes": 30,
+        "factor_vs_interval": 2.0,
+        "pause_minutes": 15
+      },
+      "atr": {
+        "enabled": false,
+        "tf": "60m",
+        "factor_vs_interval": 3.0,
+        "pause_hours": 24
+      }
+    }
+  },
+  
+  "risk_management": {
+    "max_drawdown": 0.15,
+    "daily_loss_limit": 0.03,
+    "position_size_limit": 500.0,
+    "emergency_stop_loss": 0.25
+  },
+  
+  "monitoring": {
+    "enable_logging": true,
+    "log_level": "INFO",
+    "enable_alerts": true,
+    "alert_channels": ["log"],
+    "detailed_trades": true
+  },
+  
+  "deepcoin_specific": {
+    "_comment": "DEEPCOIN平台特有调整",
+    "contract_size": 1.0,
+    "tick_size": 0.0001,
+    "min_order_size": 0.001,
+    "funding_interval": 8
+  },
+  
+  "customization": {
+    "_comment": "DC1001账号特定调整 - �?29迁移",
+    "account_specific_notes": "DEEPCOIN解套策略专用账号，从929项目迁移",
+    "original_config_symbol": "ORDIUSDT",
+    "last_tuned": "2025-09-30"
+  }
+}

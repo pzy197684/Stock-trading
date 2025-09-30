@@ -1,0 +1,35 @@
+{
+  "_comment": "Binance期货API密钥配置 - 实盘账户BN1602",
+  "_warning": "这是生产环境配置，请确保API密钥安全",
+  
+  "API_KEY": "mxtt4BRTBS0SYvEA9tuKXShhPUpwEWYF1V6x8okyaUBm3YfIxfv0EAVDqmgB6mLQ",
+  "API_SECRET": "j64A1vetky2BAFleZM46ZsS0SdkOPVybqBQ3miWsYi7rPHuyEfckpvIa9jxqN8gJ",
+  
+  "settings": {
+    "exchange": "binance",
+    "api_type": "futures",
+    "testnet": false,
+    "base_url": "https://fapi.binance.com",
+    "position_mode": "hedge",
+    "margin_type": "isolated"
+  },
+  
+  "permissions": {
+    "required": [
+      "futures_trading",
+      "futures_read"
+    ],
+    "not_allowed": [
+      "spot_trading",
+      "margin_trading", 
+      "withdrawals",
+      "deposits"
+    ]
+  },
+  
+  "safety": {
+    "ip_restriction": "required",
+    "passphrase": "",
+    "memo": "生产环境API密钥 - 请确保IP白名单设置"
+  }
+}

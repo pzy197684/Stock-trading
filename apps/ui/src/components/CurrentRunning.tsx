@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -157,6 +157,7 @@ export function CurrentRunning() {
   const [availableStrategies, setAvailableStrategies] = useState<StrategyInfo[]>([]);
   const [availableAccounts, setAvailableAccounts] = useState<AccountInfo[]>([]);
   const [availableSymbols, setAvailableSymbols] = useState<SymbolInfo[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(false);
   const [createForm, setCreateForm] = useState<CreateForm>({
     platform: '',
     account: '',
@@ -172,7 +173,7 @@ export function CurrentRunning() {
     try {
       setIsLoading(true);
       setApiError(null);
-      const response = await fetch('http://localhost:8000/api/running/instances');
+      const response = await fetch('http://localhost:8001/api/running/instances');
       if (!response.ok) {
         throw new Error(`API错误: ${response.status}`);
       }
@@ -189,7 +190,7 @@ export function CurrentRunning() {
   // 获取可用平台
   const fetchAvailablePlatforms = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/platforms/available');
+      const response = await fetch('http://localhost:8001/api/platforms/available');
       if (!response.ok) throw new Error('获取平台列表失败');
       const data = await response.json();
       setAvailablePlatforms(data.platforms || []);
@@ -201,7 +202,7 @@ export function CurrentRunning() {
   // 获取可用策略
   const fetchAvailableStrategies = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/strategies/available');
+      const response = await fetch('http://localhost:8001/api/strategies/available');
       if (!response.ok) throw new Error('获取策略列表失败');
       const data = await response.json();
       setAvailableStrategies(data.strategies || []);
@@ -210,72 +211,11 @@ export function CurrentRunning() {
     }
   };
 
-  // 获取可用交易对
-  const fetchAvailableSymbols = async (selectedPlatform?: string) => {
-    try {
-      const params = selectedPlatform ? `?platform=${selectedPlatform}` : '';
-      const response = await fetch(`http://localhost:8000/api/symbols/available${params}`);
-      if (!response.ok) throw new Error('获取交易对列表失败');
-      const data = await response.json();
-      setAvailableSymbols(data.symbols || []);
-    } catch (error) {
-      console.error('获取交易对列表失败:', error);
-    }
-  };
 
-  // 获取可用账号（支持平台筛选）
-  const fetchAvailableAccounts = async (selectedPlatform?: string) => {
-    try {
-      const params = selectedPlatform ? `?platform=${selectedPlatform}` : '';
-      const response = await fetch(`http://localhost:8000/api/accounts/available${params}`);
-      if (!response.ok) throw new Error('获取账号列表失败');
-      const data = await response.json();
-      setAvailableAccounts(data.accounts || []);
-    } catch (error) {
-      console.error('获取账号列表失败:', error);
-    }
-  };
 
-  // 测试账号连接
-  const testAccountConnection = async (accountId: string) => {
-    try {
-      const response = await fetch(`http://localhost:8000/api/accounts/${accountId}/test-connection`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      if (!response.ok) {
-        throw new Error(`连接测试失败: ${response.status}`);
-      }
-      
-      const result = await response.json();
-      
-      if (result.success) {
-        toast({
-          type: "success",
-          title: "连接成功",
-          description: `账号 ${accountId} 连接到 ${result.platform} 成功！`,
-        });
-      } else {
-        toast({
-          type: "error",
-          title: "连接失败",
-          description: result.message || `账号 ${accountId} 连接失败`,
-        });
-      }
-      
-      return result;
-    } catch (error: any) {
-      toast({
-        type: "error",
-        title: "连接错误", 
-        description: error.message || '未知错误',
-      });
-      return { success: false, message: error.message };
-    }
-  };
+
+
+
 
   // 重置创建表单
   const resetCreateForm = () => {
@@ -318,7 +258,7 @@ export function CurrentRunning() {
 
     setIsCreating(true);
     try {
-      const response = await fetch('http://localhost:8000/api/instances/create', {
+      const response = await fetch('http://localhost:8001/api/instances/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -365,50 +305,10 @@ export function CurrentRunning() {
     }
   };
 
-  // 启动策略
-  const startStrategy = async (accountId: string, strategyName: string, parameters: any = {}) => {
-    try {
-      const response = await fetch('http://localhost:8000/api/strategy/start', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          account_id: accountId,
-          strategy_name: strategyName,
-          parameters,
-        }),
-      });
-      
-      if (!response.ok) {
-        throw new Error(`启动失败: ${response.status}`);
-      }
-      
-      const result = await response.json();
-      if (result.success) {
-        toast({
-          type: "success",
-          title: "策略启动成功",
-          description: result.message,
-        });
-        fetchRunningInstances(); // 刷新数据
-      } else {
-        throw new Error(result.message);
-      }
-    } catch (error: any) {
-      console.error('启动策略失败:', error);
-      toast({
-        type: "error",
-        title: "启动失败",
-        description: error.message || '未知错误',
-      });
-    }
-  };
-
   // 停止策略
   const stopStrategy = async (accountId: string, instanceId: string) => {
     try {
-      const response = await fetch('http://localhost:8000/api/strategy/stop', {
+      const response = await fetch('http://localhost:8001/api/strategy/stop', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -579,6 +479,9 @@ export function CurrentRunning() {
 
   // 平台变更处理函数
   const handlePlatformChange = async (platform: string) => {
+    console.log('🔄 Platform changed to:', platform);
+    console.log('🔄 Previous availableAccounts:', availableAccounts.length);
+    
     setCreateForm(prev => ({
       ...prev, 
       platform, 
@@ -588,11 +491,14 @@ export function CurrentRunning() {
     
     // 加载该平台的交易对
     try {
-      const symbolsResponse = await fetch(`http://localhost:8000/api/symbols/available?platform=${platform}`);
+      console.log('📡 Fetching symbols for platform:', platform);
+      const symbolsResponse = await fetch(`http://localhost:8001/api/symbols/available?platform=${platform}`);
       if (symbolsResponse.ok) {
         const data = await symbolsResponse.json();
+        console.log('✅ Symbols loaded:', data.symbols?.length || 0);
         setAvailableSymbols(data.symbols || []);
       } else {
+        console.error('❌ Failed to load symbols, status:', symbolsResponse.status);
         setAvailableSymbols([]);
       }
     } catch (error) {
@@ -602,16 +508,22 @@ export function CurrentRunning() {
     
     // 加载该平台的账号
     try {
-      const accountsResponse = await fetch(`http://localhost:8000/api/accounts/available?platform=${platform}`);
+      setAccountsLoading(true);
+      console.log('📡 Fetching accounts for platform:', platform);
+      const accountsResponse = await fetch(`http://localhost:8001/api/accounts/available?platform=${platform}`);
       if (accountsResponse.ok) {
         const data = await accountsResponse.json();
+        console.log('✅ Accounts loaded:', data.accounts?.length || 0, data.accounts);
         setAvailableAccounts(data.accounts || []);
       } else {
+        console.error('❌ Failed to load accounts, status:', accountsResponse.status);
         setAvailableAccounts([]);
       }
     } catch (error) {
       console.error('获取账号失败:', error);
       setAvailableAccounts([]);
+    } finally {
+      setAccountsLoading(false);
     }
   };
 
@@ -621,7 +533,7 @@ export function CurrentRunning() {
     
     // 测试账号连接
     try {
-      const testResponse = await fetch(`http://localhost:8000/api/accounts/${accountId}/test-connection`, {
+      const testResponse = await fetch(`http://localhost:8001/api/accounts/${accountId}/test-connection`, {
         method: 'POST'
       });
       
@@ -717,7 +629,13 @@ export function CurrentRunning() {
                 <label className="text-sm font-medium">
                   交易平台 *
                 </label>
-                <Select value={createForm.platform} onValueChange={handlePlatformChange}>
+                <Select 
+                  value={createForm.platform} 
+                  onValueChange={(value) => {
+                    console.log('🎯 Platform select onValueChange triggered:', value);
+                    handlePlatformChange(value);
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="请先选择交易平台" />
                   </SelectTrigger>
@@ -761,19 +679,24 @@ export function CurrentRunning() {
                   disabled={!createForm.platform}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder={createForm.platform ? "选择账号" : "请先选择平台"} />
+                    <SelectValue placeholder={
+                      accountsLoading ? "加载账号中..." : 
+                      createForm.platform ? `选择账号 (共${availableAccounts.length}个)` : 
+                      "请先选择平台"
+                    } />
                   </SelectTrigger>
                   <SelectContent>
-                    {availableAccounts.length > 0 && (
-                      availableAccounts.map((account: AccountInfo) => (
+                    {(() => {
+                      console.log('🚀 Account SelectContent render - platform:', createForm.platform, 'accounts:', availableAccounts.length);
+                      return availableAccounts.map((account: AccountInfo) => (
                         <SelectItem key={account.id} value={account.id}>
                           {account.name} ({account.platform || '未知平台'})
                           <Badge variant="outline" className="ml-2 text-xs">
                             {account.status}
                           </Badge>
                         </SelectItem>
-                      ))
-                    )}
+                      ));
+                    })()}
                   </SelectContent>
                 </Select>
                 {createForm.platform && availableAccounts.length === 0 && (
@@ -1214,7 +1137,7 @@ export function CurrentRunning() {
                           </span>
                           <p className="font-medium text-red-600">
                             {instance.liquidationPrice.long
-                              ? `$${instance.liquidationPrice.long.toLocaleString()}`
+                              ? `$${(instance.liquidationPrice.long as number).toLocaleString()}`
                               : "无"}
                           </p>
                         </div>
@@ -1292,7 +1215,7 @@ export function CurrentRunning() {
                           </span>
                           <p className="font-medium text-red-600">
                             {instance.liquidationPrice.short
-                              ? `$${instance.liquidationPrice.short.toLocaleString()}`
+                              ? `$${(instance.liquidationPrice.short as number).toLocaleString()}`
                               : "无"}
                           </p>
                         </div>

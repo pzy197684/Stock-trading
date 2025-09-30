@@ -1,0 +1,85 @@
+{
+  "_comment": "CW1602 CoinW解套策略配置（备用）",
+  "_derived_from": "profiles/_shared_defaults/strategies/recovery.defaults.json",
+  "_status": "disabled",
+  
+  "strategy": {
+    "name": "recovery",
+    "version": "2.0.0",
+    "description": "解套策略 - CW1602 CoinW备用配置"
+  },
+  
+  "recovery": {
+    "mode": "long_trapped",
+    "cap_ratio": 0.6,
+    "ttl_seconds": 300,
+    "use_limit_tp": true,
+    
+    "grid": {
+      "add_interval_pct": 0.035,
+      "tp_first_order_pct": 0.015,
+      "tp_before_full_pct": 0.025,
+      "tp_after_full_pct": 0.015,
+      "tp_reprice_tol_ratio": 0.001,
+      
+      "martingale": {
+        "first_qty": 30.0,
+        "multiplier": 1.8,
+        "max_add_times": 5
+      }
+    },
+    
+    "confirm": {
+      "kline": "15m",
+      "filters": {
+        "body_min_frac_of_interval": 0.3,
+        "wick_to_body_max": 1.8,
+        "followthrough_window_min": 20
+      }
+    },
+    
+    "circuit_breakers": {
+      "jump": {
+        "enabled": true,
+        "window_minutes": 25,
+        "factor_vs_interval": 2.5,
+        "pause_minutes": 20
+      },
+      "atr": {
+        "enabled": true,
+        "tf": "1h",
+        "factor_vs_interval": 2.8,
+        "pause_hours": 12
+      }
+    }
+  },
+  
+  "risk_management": {
+    "max_drawdown": 0.15,
+    "daily_loss_limit": 0.03,
+    "position_size_limit": 500.0,
+    "emergency_stop_loss": 0.25
+  },
+  
+  "monitoring": {
+    "enable_logging": true,
+    "log_level": "INFO",
+    "enable_alerts": true,
+    "alert_channels": ["log"],
+    "detailed_trades": true
+  },
+  
+  "coinw_specific": {
+    "_comment": "CoinW平台特有调整",
+    "contract_size": 1.0,
+    "tick_size": 0.01,
+    "min_order_size": 0.001,
+    "funding_interval": 8
+  },
+  
+  "customization": {
+    "_comment": "CW1602账号特定调整",
+    "account_specific_notes": "CoinW解套策略备用配置，需要时启用",
+    "last_tuned": "2025-09-30"
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "_comment": "BN8891账号设置配置（非敏感信息�?,
+  "_description": "账号说明、风控偏好、告警开关等配置",
+  
+  "account_info": {
+    "account_name": "BN8891",
+    "description": "Binance实盘账户配置",
+    "platform": "binance",
+    "environment": "production",
+    "created_date": "2025-09-30"
+  },
+  
+  "trading_settings": {
+    "default_symbol": "ORDIUSDT",
+    "position_mode": "hedge",
+    "margin_type": "isolated",
+    "leverage": 1,
+    "max_position_size": 1.0
+  },
+  
+  "risk_limits": {
+    "max_daily_loss": 100.0,
+    "max_total_position": 1.0,
+    "max_open_orders": 10,
+    "max_drawdown": 0.1,
+    "emergency_stop_loss": 0.15
+  },
+  
+  "notification": {
+    "enable_alerts": true,
+    "webhook_url": "",
+    "email_alerts": false,
+    "telegram_alerts": false,
+    "alert_events": [
+      "strategy_start",
+      "strategy_stop", 
+      "large_loss",
+      "circuit_breaker_trigger",
+      "position_full"
+    ]
+  },
+  
+  "monitoring": {
+    "enable_detailed_logging": true,
+    "log_retention_days": 30,
+    "performance_tracking": true,
+    "real_time_metrics": true
+  }
+}

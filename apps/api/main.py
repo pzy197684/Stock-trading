@@ -17,7 +17,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from core.managers.platform_manager import get_platform_manager
-from core.managers.strategy_manager_new import get_strategy_manager
+from core.managers.strategy_manager import get_strategy_manager
 from core.state_store import get_state_manager
 from core.utils.plugin_loader import get_plugin_loader
 from core.logger import logger
@@ -28,6 +28,15 @@ app = FastAPI(
     title="Stock Trading API",
     description="API服务为股票交易系统前端提供数据接口",
     version="1.0.0"
+)
+
+# 添加CORS支持
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 在生产环境中应该设置为具体的域名
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # CORS设置
@@ -243,25 +252,35 @@ async def get_running_instances():
     try:
         instances = []
         
-        # 使用策略管理器获取运行实例
-        active_strategies = strategy_manager.get_active_strategies()
+        # 安全地获取活跃策略
+        try:
+            active_strategies = strategy_manager.get_active_strategies()
+            logger.log_info(f"Found {len(active_strategies)} active strategies")
+        except Exception as e:
+            logger.log_error(f"Failed to get active strategies: {e}")
+            active_strategies = []
         
         for strategy_instance in active_strategies:
-            instances.append({
-                "id": getattr(strategy_instance, 'instance_id', 'unknown'),
-                "account": getattr(strategy_instance, 'account', 'unknown'),
-                "platform": getattr(strategy_instance, 'platform', 'unknown'),
-                "strategy": getattr(strategy_instance, 'strategy_name', 'unknown'),
-                "status": getattr(strategy_instance, 'status', 'unknown'),
-                "profit": getattr(strategy_instance, 'total_profit', 0.0),
-                "profit_rate": getattr(strategy_instance, 'profit_rate', 0.0),
-                "positions": len(getattr(strategy_instance, 'positions', [])),
-                "orders": len(getattr(strategy_instance, 'orders', [])),
-                "runtime": getattr(strategy_instance, 'runtime_seconds', 0),
-                "last_signal": getattr(strategy_instance, 'last_signal_time', None),
-                "parameters": getattr(strategy_instance, 'parameters', {})
-            })
+            try:
+                instances.append({
+                    "id": getattr(strategy_instance, 'instance_id', 'unknown'),
+                    "account": getattr(strategy_instance, 'account', 'unknown'),
+                    "platform": getattr(strategy_instance, 'platform', 'unknown'),
+                    "strategy": getattr(strategy_instance, 'strategy_name', 'unknown'),
+                    "status": getattr(strategy_instance, 'status', 'unknown'),
+                    "profit": getattr(strategy_instance, 'total_profit', 0.0),
+                    "profit_rate": getattr(strategy_instance, 'profit_rate', 0.0),
+                    "positions": len(getattr(strategy_instance, 'positions', [])),
+                    "orders": len(getattr(strategy_instance, 'orders', [])),
+                    "runtime": getattr(strategy_instance, 'runtime_seconds', 0),
+                    "last_signal": getattr(strategy_instance, 'last_signal_time', None),
+                    "parameters": getattr(strategy_instance, 'parameters', {})
+                })
+            except Exception as e:
+                logger.log_error(f"Error processing strategy instance: {e}")
+                continue
         
+        logger.log_info(f"Returning {len(instances)} strategy instances")
         return {"instances": instances}
     except Exception as e:
         logger.log_error(f"获取运行实例失败: {e}")
@@ -335,8 +354,16 @@ async def get_missing_features():
 async def get_available_accounts(platform: Optional[str] = None):
     """获取可用账号列表 - 支持按平台筛选"""
     try:
+        logger.log_info(f"=== ACCOUNTS API CALLED ===")
+        logger.log_info(f"Platform filter: {platform}")
+        
         # 方法1：从状态管理器获取已配置账号
-        account_summaries = state_manager.get_all_accounts_summary()
+        try:
+            account_summaries = state_manager.get_all_accounts_summary()
+            logger.log_info(f"State manager found {len(account_summaries)} accounts")
+        except Exception as e:
+            logger.log_error(f"State manager error: {e}")
+            account_summaries = []
         accounts = []
         
         for summary in account_summaries:
@@ -355,45 +382,52 @@ async def get_available_accounts(platform: Optional[str] = None):
                         "last_active": summary.get('last_update', None)
                     })
         
-        # 方法2：扫描profiles目录获取配置的账号
+        # 方法2：扫描新的profiles目录获取配置的账号
         import os
-        profiles_dir = "d:/Desktop/Stock-trading/profiles"
+        profiles_dir = "profiles"
         logger.log_info(f"Checking profiles directory: {profiles_dir}")
         
         if os.path.exists(profiles_dir):
-            logger.log_info(f"Profiles directory exists, scanning...")
-            for item in os.listdir(profiles_dir):
-                logger.log_info(f"Found item: {item}")
-                item_path = os.path.join(profiles_dir, item)
-                if os.path.isdir(item_path):
-                    config_file = os.path.join(item_path, 'config.json')
-                    logger.log_info(f"Checking config file: {config_file}")
-                    if os.path.exists(config_file):
-                        logger.log_info(f"Config file exists, reading...")
-                        try:
-                            with open(config_file, 'r', encoding='utf-8') as f:
-                                config = json.load(f)
-                                account_platform = config.get('platform', 'unknown')
-                                logger.log_info(f"Loaded config for {item}, platform: {account_platform}")
-                                
-                                # 平台筛选
-                                if platform is None or account_platform == platform:
-                                    # 检查是否已在列表中
-                                    if not any(acc['id'] == item for acc in accounts):
-                                        accounts.append({
-                                            "id": item,
-                                            "name": config.get('display_name', item),
-                                            "platform": account_platform,
-                                            "status": "configured",
-                                            "balance": 0.0,
-                                            "last_active": None,
-                                            "config": config
-                                        })
-                        except Exception as e:
-                            logger.log_error(f"Failed to read config for account {item}: {e}")
+            logger.log_info(f"New profiles directory exists, scanning...")
+            # 扫描平台目录 (BINANCE, COINW, OKX, DEEP)
+            for platform_dir in os.listdir(profiles_dir):
+                if platform_dir.startswith('_'):  # 跳过 _shared_defaults
+                    continue
+                platform_path = os.path.join(profiles_dir, platform_dir)
+                if os.path.isdir(platform_path):
+                    logger.log_info(f"Scanning platform: {platform_dir}")
+                    # 扫描账号目录
+                    for account in os.listdir(platform_path):
+                        account_path = os.path.join(platform_path, account)
+                        if os.path.isdir(account_path):
+                            profile_file = os.path.join(account_path, 'profile.json')
+                            logger.log_info(f"Checking profile file: {profile_file}")
+                            if os.path.exists(profile_file):
+                                logger.log_info(f"Profile file exists, reading...")
+                                try:
+                                    with open(profile_file, 'r', encoding='utf-8') as f:
+                                        profile = json.load(f)
+                                        account_platform = profile.get('profile_info', {}).get('platform', 'unknown')
+                                        logger.log_info(f"Loaded profile for {account}, platform: {account_platform}")
+                                        
+                                        # 平台筛选 (不区分大小写)
+                                        if platform is None or account_platform.lower() == platform.lower():
+                                            # 检查是否已在列表中
+                                            if not any(acc['id'] == account for acc in accounts):
+                                                accounts.append({
+                                                    "id": account,
+                                                    "name": profile.get('profile_info', {}).get('display_name', account),
+                                                    "platform": account_platform,
+                                                    "status": "configured",
+                                                    "balance": 0.0,
+                                                    "last_active": None,
+                                                    "config": profile
+                                                })
+                                except Exception as e:
+                                    logger.log_error(f"Failed to read profile for account {account}: {e}")
         
         # 方法3：扫描state目录获取账号文件夹(向后兼容)
-        state_dir = "d:/Desktop/Stock-trading/state"
+        state_dir = "state"
         if os.path.exists(state_dir):
             for item in os.listdir(state_dir):
                 item_path = os.path.join(state_dir, item)
@@ -409,21 +443,59 @@ async def get_available_accounts(platform: Optional[str] = None):
                             "last_active": None
                         })
         
+        logger.log_info(f"Total accounts found: {len(accounts)}")
+        for acc in accounts:
+            logger.log_info(f"Account: {acc['id']}, Platform: {acc['platform']}, Status: {acc['status']}")
+        
         return {"accounts": accounts}
         
     except Exception as e:
         logger.log_error(f"获取可用账号失败: {e}")
         return {"accounts": []}
 
+@app.get("/api/accounts/{platform}")
+async def get_accounts_by_platform(platform: str):
+    """根据平台获取账号列表 - 兼容性端点"""
+    try:
+        logger.log_info(f"=== PLATFORM ACCOUNTS API CALLED ===")
+        logger.log_info(f"Platform: {platform}")
+        
+        # 调用通用账号API并按平台筛选
+        result = await get_available_accounts(platform=platform)
+        accounts = result.get("accounts", [])
+        
+        logger.log_info(f"Found {len(accounts)} accounts for platform {platform}")
+        for acc in accounts:
+            logger.log_info(f"Account: {acc['id']}, Platform: {acc['platform']}, Status: {acc['status']}")
+        
+        # 直接返回账号数组，与之前的格式保持一致
+        return accounts
+        
+    except Exception as e:
+        logger.log_error(f"获取平台账号失败: {e}")
+        return []
+
 @app.post("/api/accounts/{account_id}/test-connection")
 async def test_account_connection(account_id: str):
     """测试账号平台连接"""
     try:
-        # 首先从profiles目录读取账号配置
-        profiles_dir = "d:/Desktop/Stock-trading/profiles"
-        config_file = os.path.join(profiles_dir, account_id, 'config.json')
+        # 首先从新的profiles目录读取账号配置
+        profiles_dir = "profiles"
+        # 扫描平台目录找到账号
+        account_config_path = None
+        for platform_dir in os.listdir(profiles_dir):
+            if platform_dir.startswith('_'):
+                continue
+            platform_path = os.path.join(profiles_dir, platform_dir)
+            if os.path.isdir(platform_path):
+                account_path = os.path.join(platform_path, account_id)
+                if os.path.isdir(account_path):
+                    config_file = os.path.join(account_path, 'profile.json')
+                    if os.path.exists(config_file):
+                        account_config_path = config_file
+                        break
         
-        if not os.path.exists(config_file):
+        if not account_config_path:
             return {
                 "success": False,
                 "message": f"账号 {account_id} 配置文件不存在",
@@ -431,9 +503,10 @@ async def test_account_connection(account_id: str):
             }
         
         # 读取账号配置
-        with open(config_file, 'r', encoding='utf-8') as f:
-            config = json.load(f)
+        with open(account_config_path, 'r', encoding='utf-8') as f:
+            profile = json.load(f)
         
+        config = profile.get('profile_info', {})
         platform_name = config.get('platform')
         if not platform_name:
             return {
@@ -443,9 +516,9 @@ async def test_account_connection(account_id: str):
             }
         
         # 获取API密钥
-        api_credentials = config.get('api_credentials', {})
+        api_credentials = profile.get('exchange_config', {}).get('credentials', {})
         api_key = api_credentials.get('api_key')
-        api_secret = api_credentials.get('api_secret')
+        api_secret = api_credentials.get('secret_key')
         
         if not api_key or not api_secret:
             return {
@@ -661,6 +734,13 @@ async def create_instance(request: CreateInstanceRequest):
             params=final_params
         )
         
+        # 自动启动策略实例
+        start_success = strategy_manager.start_strategy(request.account_id, instance_id)
+        if start_success:
+            logger.log_info(f"🚀 Auto-started strategy instance: {request.account_id}/{instance_id}")
+        else:
+            logger.log_warning(f"⚠️ Failed to auto-start strategy instance: {request.account_id}/{instance_id}")
+        
         # 广播更新
         await manager.broadcast({
             "type": "instance_created",
@@ -668,6 +748,7 @@ async def create_instance(request: CreateInstanceRequest):
             "platform": request.platform,
             "strategy": request.strategy,
             "instance_id": instance_id,
+            "started": start_success,
             "timestamp": datetime.now().isoformat()
         })
         
@@ -675,16 +756,19 @@ async def create_instance(request: CreateInstanceRequest):
         
         return {
             "success": True,
-            "message": f"实例 {request.strategy} 创建成功",
+            "message": f"实例 {request.strategy} 创建成功" + (" 并已启动" if start_success else " 但启动失败"),
             "instance_id": instance_id,
             "account_id": request.account_id,
             "platform": request.platform,
-            "strategy": request.strategy
+            "strategy": request.strategy,
+            "started": start_success
         }
         
     except Exception as e:
         logger.log_error(f"❌ Create instance failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        logger.log_error(f"Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"创建实例失败: {str(e)}")
 
 @app.post("/api/strategy/start")
 async def start_strategy(
@@ -866,4 +950,4 @@ async def websocket_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=8001)

@@ -7,8 +7,9 @@ from core.services.order_service import build_order
 from core.services.risk_service import should_pause_due_to_fast_add
 from core.logger import logger
 from core.domain.enums import PositionField
-from core.domain.models import OrderRequest
+from core.domain.models import OrderReq
 from core.utils.decimal_ext import Decimal, ZERO
+from decimal import ROUND_DOWN
 from core.platform.base import OrderSide, OrderType, OrderStatus
 from typing import Dict, Any, List, Optional, Union
 from dataclasses import dataclass

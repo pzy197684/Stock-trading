@@ -69,7 +69,7 @@ export interface SystemStatus {
 }
 
 class ApiClient {
-  private baseUrl = 'http://localhost:8000';
+  private baseUrl = 'http://localhost:8001';
   private ws: WebSocket | null = null;
 
   async get<T>(endpoint: string): Promise<T> {
@@ -155,7 +155,7 @@ class ApiClient {
       this.ws.close();
     }
 
-    this.ws = new WebSocket('ws://localhost:8000/ws');
+    this.ws = new WebSocket('ws://localhost:8001/ws');
     
     this.ws.onopen = () => {
       console.log('WebSocket连接已建立');

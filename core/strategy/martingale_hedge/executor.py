@@ -7,7 +7,7 @@ from core.strategy.base import TradingSignal, SignalType, StrategyContext
 from core.platform.base import ExchangeIf, OrderSide, OrderType
 from core.logger import logger
 from core.utils.decimal_ext import Decimal, ZERO
-from core.domain.models import OrderRequest
+from core.domain.models import OrderReq
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
 import time

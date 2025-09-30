@@ -1,0 +1,52 @@
+{
+  "_comment": "CW1602 CoinW账号主配置文件",
+  "_description": "账号入口点和策略索引",
+  "_created": "2025-09-30",
+  
+  "profile_info": {
+    "account_id": "CW1602",
+    "account_name": "CW1602",
+    "platform": "coinw",
+    "environment": "production",
+    "status": "active",
+    "description": "CoinW实盘账户配置",
+    "created_date": "2025-09-30",
+    "last_modified": "2025-09-30"
+  },
+  
+  "api_config": {
+    "config_file": "accounts/COINW/CW1602/coinw_api.json",
+    "platform_adapter": "coinw",
+    "connection_type": "rest_websocket"
+  },
+  
+  "settings": {
+    "config_file": "profiles/COINW/CW1602/account_settings.json"
+  },
+  
+  "available_strategies": [
+    {
+      "name": "martingale_hedge",
+      "config_file": "profiles/COINW/CW1602/strategies/martingale_hedge.json",
+      "status": "available",
+      "description": "CoinW马丁对冲策略"
+    },
+    {
+      "name": "recovery",
+      "config_file": "profiles/COINW/CW1602/strategies/recovery.json",
+      "status": "disabled",
+      "description": "CoinW解套策略（备用）"
+    }
+  ],
+  
+  "defaults": {
+    "strategy_templates": "profiles/_shared_defaults/strategies/",
+    "fallback_config": "profiles/_shared_defaults/account_settings.json"
+  },
+  
+  "metadata": {
+    "migration_source": "928/state/CW1602/",
+    "migration_date": "2025-09-30",
+    "version": "1.0.0"
+  }
+}

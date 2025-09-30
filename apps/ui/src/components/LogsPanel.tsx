@@ -44,7 +44,7 @@ export function LogsPanel() {
         params.append('level', levelFilter.toUpperCase());
       }
       
-      const response = await fetch(`http://localhost:8000/api/logs/recent?${params}`);
+      const response = await fetch(`http://localhost:8001/api/logs/recent?${params}`);
       if (!response.ok) {
         throw new Error(`API错误: ${response.status}`);
       }

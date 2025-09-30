@@ -1,0 +1,53 @@
+{
+  "_comment": "OKX8891 OKX API配置文件 - 从929解套策略迁移",
+  "_description": "OKX API密钥和连接配置 - 解套策略专用",
+  "_created": "2025-09-30",
+  "_account": "OKX8891",
+  "_migration_source": "929/profiles/OKX/OKX8891/",
+  
+  "api_config": {
+    "api_key": "YOUR_OKX_API_KEY_HERE",
+    "api_secret": "YOUR_OKX_API_SECRET_HERE",
+    "passphrase": "YOUR_OKX_PASSPHRASE_HERE",
+    
+    "endpoints": {
+      "base_url": "https://www.okx.com",
+      "futures_base_url": "https://aws.okx.com",
+      "websocket_url": "wss://ws.okx.com:8443/ws/v5/public"
+    },
+    
+    "trading_config": {
+      "position_mode": "net_mode",
+      "margin_mode": "isolated",
+      "default_leverage": 1,
+      "order_type_preference": "market"
+    },
+    
+    "connection_config": {
+      "timeout": 30,
+      "retry_attempts": 3,
+      "retry_delay": 1.0,
+      "rate_limit": 600,
+      "enable_rate_limit": true
+    }
+  },
+  
+  "security": {
+    "ip_whitelist": [],
+    "permissions_required": [
+      "read",
+      "trade",
+      "futures"
+    ],
+    "two_factor_auth": false
+  },
+  
+  "validation": {
+    "_instructions": "配置前请确认API权限和IP白名单",
+    "required_permissions": [
+      "Read account information",
+      "Futures trading",
+      "Order management"
+    ]
+  }
+}

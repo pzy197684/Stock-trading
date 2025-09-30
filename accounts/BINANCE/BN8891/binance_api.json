@@ -1,0 +1,36 @@
+{
+  "_comment": "BN8891 Binance API配置 - 从929解套策略迁移",
+  "_migration_source": "929/profiles/BINANCE/BN8891/credentials.json",
+  "_strategy_focus": "recovery strategy",
+  
+  "API_KEY": "",
+  "API_SECRET": "",
+  
+  "settings": {
+    "exchange": "binance",
+    "api_type": "futures",
+    "testnet": false,
+    "base_url": "https://fapi.binance.com",
+    "position_mode": "hedge",
+    "margin_type": "isolated"
+  },
+  
+  "permissions": {
+    "required": [
+      "futures_trading",
+      "futures_read"
+    ],
+    "not_allowed": [
+      "spot_trading",
+      "margin_trading", 
+      "withdrawals",
+      "deposits"
+    ]
+  },
+  
+  "safety": {
+    "ip_restriction": "required",
+    "passphrase": "",
+    "memo": "生产环境API密钥 - 请确保IP白名单设置"
+  }
+}

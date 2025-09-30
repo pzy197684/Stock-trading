@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Direct Frontend Test</title>
+    <script>
+        async function simulatePlatformChange() {
+            console.log('Simulating platform change to binance...');
+            
+            try {
+                // Test platforms API
+                const platformsResponse = await fetch('http://localhost:8001/api/platforms/available');
+                console.log('Platforms response:', platformsResponse.status);
+                const platformsData = await platformsResponse.json();
+                console.log('Platforms data:', platformsData);
+                
+                // Test accounts API for binance
+                const accountsResponse = await fetch('http://localhost:8001/api/accounts/available?platform=binance');
+                console.log('Accounts response status:', accountsResponse.status);
+                const accountsData = await accountsResponse.json();
+                console.log('Accounts data:', accountsData);
+                console.log('Number of accounts:', accountsData.accounts ? accountsData.accounts.length : 0);
+                
+                // Display results
+                document.getElementById('result').innerHTML = 
+                    '<h3>Test Results:</h3>' +
+                    '<p>Platforms: ' + (platformsData.platforms ? platformsData.platforms.length : 0) + '</p>' +
+                    '<p>Accounts for Binance: ' + (accountsData.accounts ? accountsData.accounts.length : 0) + '</p>' +
+                    '<pre>' + JSON.stringify(accountsData, null, 2) + '</pre>';
+                
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('result').innerHTML = '<h3>Error:</h3><p>' + error.message + '</p>';
+            }
+        }
+        
+        // Auto-run test when page loads
+        window.addEventListener('load', simulatePlatformChange);
+    </script>
+</head>
+<body>
+    <h1>Direct Frontend Test</h1>
+    <button onclick="simulatePlatformChange()">Test Platform Change</button>
+    <div id="result">Loading...</div>
+</body>
+</html>

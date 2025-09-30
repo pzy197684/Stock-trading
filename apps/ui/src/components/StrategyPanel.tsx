@@ -32,7 +32,7 @@ export function StrategyPanel() {
     try {
       setIsLoading(true);
       setApiError(null);
-      const response = await fetch('http://localhost:8000/api/strategies/available');
+      const response = await fetch('http://localhost:8001/api/strategies/available');
       if (!response.ok) {
         throw new Error(`API错误: ${response.status}`);
       }

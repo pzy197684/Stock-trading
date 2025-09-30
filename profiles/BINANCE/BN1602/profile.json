@@ -1,0 +1,41 @@
+{
+  "_comment": "BN1602账号运行档案入口配置",
+  "_description": "极简入口manifest，指向API配置和策略配置",
+  
+  "profile_info": {
+    "account_id": "BN1602",
+    "display_name": "实盘账号 - 币安1602",
+    "platform": "binance",
+    "description": "Binance期货实盘交易账号（生产环境）",
+    "environment": "production"
+  },
+  
+  "api_config": {
+    "path": "accounts/BINANCE/BN1602/binance_api.json",
+    "type": "binance_futures"
+  },
+  
+  "available_strategies": [
+    {
+      "name": "martingale_hedge",
+      "config_path": "profiles/BINANCE/BN1602/strategies/martingale_hedge.json",
+      "enabled": true
+    },
+    {
+      "name": "recovery", 
+      "config_path": "profiles/BINANCE/BN1602/strategies/recovery.json",
+      "enabled": false
+    }
+  ],
+  
+  "runtime": {
+    "mode": "live",
+    "auto_start": false,
+    "log_path": "logs/BN1602/",
+    "state_path": "state/BN1602/"
+  },
+  
+  "created_at": "2025-09-30T00:00:00Z",
+  "last_modified": "2025-09-30T00:00:00Z",
+  "status": "production_ready"
+}

@@ -1,0 +1,93 @@
+{
+  "_comment": "BN1602账号马丁对冲策略配置",
+  "_derived_from": "profiles/_shared_defaults/strategies/martingale_hedge.defaults.json",
+  
+  "strategy": {
+    "name": "martingale_hedge",
+    "version": "3.0.0",
+    "description": "马丁对冲策略 - BN1602实盘配置"
+  },
+  
+  "trading": {
+    "symbol": "ETHUSDT",
+    "order_type": "MARKET",
+    "interval": 5,
+    
+    "long": {
+      "first_qty": 0.01,
+      "add_ratio": 2.0,
+      "add_interval": 0.02,
+      "max_add_times": 3,
+      "tp_first_order": 0.01,
+      "tp_before_full": 0.015,
+      "tp_after_full": 0.02
+    },
+    
+    "short": {
+      "first_qty": 0.01,
+      "add_ratio": 2.0,
+      "add_interval": 0.02,
+      "max_add_times": 3,
+      "tp_first_order": 0.01,
+      "tp_before_full": 0.015,
+      "tp_after_full": 0.02
+    },
+    
+    "hedge": {
+      "trigger_loss": 0.05,
+      "equal_eps": 0.01,
+      "min_wait_seconds": 60,
+      "release_tp_after_full": {
+        "long": 0.02,
+        "short": 0.02
+      },
+      "release_sl_loss_ratio": {
+        "long": 1.0,
+        "short": 1.0
+      }
+    }
+  },
+  
+  "risk_control": {
+    "tp_slippage": 0.002,
+    "max_total_qty": 0.5,
+    "cooldown_minutes": 1,
+    "fast_add_window": 300,
+    "max_daily_loss": 100.0,
+    "emergency_stop_loss": 0.1,
+    "position_size_limit": 1.0
+  },
+  
+  "execution": {
+    "max_slippage": 0.001,
+    "retry_attempts": 3,
+    "retry_delay": 1.0,
+    "order_timeout": 30,
+    "enable_order_confirmation": true
+  },
+  
+  "monitoring": {
+    "enable_logging": true,
+    "log_level": "INFO",
+    "enable_alerts": true,
+    "alert_channels": ["log"],
+    "detailed_trades": true
+  },
+  
+  "safety": {
+    "require_manual_start": true,
+    "auto_stop_on_error": true,
+    "max_consecutive_losses": 5,
+    "circuit_breaker": {
+      "enabled": true,
+      "max_drawdown": 0.08,
+      "pause_minutes": 30
+    }
+  },
+  
+  "customization": {
+    "_comment": "BN1602账号特定调整",
+    "account_specific_notes": "实盘账号，谨慎交�?,
+    "last_tuned": "2025-09-30"
+  }
+}

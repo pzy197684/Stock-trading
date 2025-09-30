@@ -31,7 +31,7 @@ export function ConsoleTools() {
     
     // 尝试从API获取系统信息
     if (cmd === 'status') {
-      fetch('http://localhost:8000/health')
+      fetch('http://localhost:8001/health')
         .then(response => response.json())
         .then(data => {
           const apiOutput = [
@@ -49,7 +49,7 @@ export function ConsoleTools() {
     }
     
     if (cmd === 'accounts') {
-      fetch('http://localhost:8000/api/dashboard/summary')
+      fetch('http://localhost:8001/api/dashboard/summary')
         .then(response => response.json())
         .then(data => {
           const apiOutput = [
@@ -68,7 +68,7 @@ export function ConsoleTools() {
     }
     
     if (cmd === 'strategies') {
-      fetch('http://localhost:8000/api/strategies/available')
+      fetch('http://localhost:8001/api/strategies/available')
         .then(response => response.json())
         .then(data => {
           const apiOutput = [

@@ -1,0 +1,42 @@
+{
+  "_comment": "BN8891账号运行档案入口配置",
+  "_description": "极简入口manifest，指向API配置和策略配置",
+  
+  "profile_info": {
+    "account_id": "BN8891",
+    "display_name": "解套策略 - 币安8891",
+    "platform": "binance",
+    "description": "Binance期货解套策略专用账号（从929项目迁移）",
+    "environment": "production"
+  },
+  
+  "api_config": {
+    "path": "accounts/BINANCE/BN8891/binance_api.json",
+    "type": "binance_futures"
+  },
+  
+  "available_strategies": [
+    {
+      "name": "martingale_hedge",
+      "config_path": "profiles/BINANCE/BN8891/strategies/martingale_hedge.json",
+      "enabled": true
+    },
+    {
+      "name": "recovery", 
+      "config_path": "profiles/BINANCE/BN8891/strategies/recovery.json",
+      "enabled": true,
+      "description": "929项目迁移的解套策略配置"
+    }
+  ],
+  
+  "runtime": {
+    "mode": "live",
+    "auto_start": false,
+    "log_path": "logs/BN8891/",
+    "state_path": "state/BN8891/"
+  },
+  
+  "created_at": "2025-09-30T00:00:00Z",
+  "last_modified": "2025-09-30T00:00:00Z",
+  "status": "production_ready"
+}
