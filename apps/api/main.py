@@ -262,6 +262,14 @@ async def get_running_instances():
         
         for strategy_instance in active_strategies:
             try:
+                # 获取策略参数
+                parameters = getattr(strategy_instance, 'parameters', {})
+                # 从参数中提取交易对信息
+                symbol = parameters.get('symbol', 'BTC/USDT')
+                # 如果symbol不包含/，转换为标准格式
+                if symbol and 'USDT' in symbol and '/' not in symbol:
+                    symbol = symbol.replace('USDT', '/USDT')
+                
                 instances.append({
                     "id": getattr(strategy_instance, 'instance_id', 'unknown'),
                     "account": getattr(strategy_instance, 'account', 'unknown'),
@@ -274,7 +282,8 @@ async def get_running_instances():
                     "orders": len(getattr(strategy_instance, 'orders', [])),
                     "runtime": getattr(strategy_instance, 'runtime_seconds', 0),
                     "last_signal": getattr(strategy_instance, 'last_signal_time', None),
-                    "parameters": getattr(strategy_instance, 'parameters', {})
+                    "symbol": symbol,  # 添加交易对信息
+                    "parameters": parameters
                 })
             except Exception as e:
                 logger.log_error(f"Error processing strategy instance: {e}")
@@ -357,35 +366,15 @@ async def get_available_accounts(platform: Optional[str] = None):
         logger.log_info(f"=== ACCOUNTS API CALLED ===")
         logger.log_info(f"Platform filter: {platform}")
         
-        # 方法1：从状态管理器获取已配置账号
-        try:
-            account_summaries = state_manager.get_all_accounts_summary()
-            logger.log_info(f"State manager found {len(account_summaries)} accounts")
-        except Exception as e:
-            logger.log_error(f"State manager error: {e}")
-            account_summaries = []
         accounts = []
-        
-        for summary in account_summaries:
-            account_id = summary.get('account', 'unknown')
-            account_platform = summary.get('platform', 'unknown')
-            
-            if account_id != 'unknown':
-                # 如果指定了平台，只返回该平台的账号
-                if platform is None or account_platform == platform:
-                    accounts.append({
-                        "id": account_id,
-                        "name": account_id,
-                        "platform": account_platform,
-                        "status": summary.get('status', 'disconnected'),
-                        "balance": summary.get('balance', 0.0),
-                        "last_active": summary.get('last_update', None)
-                    })
         
         # 方法2：扫描新的profiles目录获取配置的账号
         import os
-        profiles_dir = "profiles"
+        # 确保使用正确的profiles目录路径
+        profiles_dir = os.path.join(project_root, "profiles")
         logger.log_info(f"Checking profiles directory: {profiles_dir}")
+        logger.log_info(f"Current working directory: {os.getcwd()}")
+        logger.log_info(f"Project root: {project_root}")
         
         if os.path.exists(profiles_dir):
             logger.log_info(f"New profiles directory exists, scanning...")
@@ -409,9 +398,11 @@ async def get_available_accounts(platform: Optional[str] = None):
                                         profile = json.load(f)
                                         account_platform = profile.get('profile_info', {}).get('platform', 'unknown')
                                         logger.log_info(f"Loaded profile for {account}, platform: {account_platform}")
+                                        logger.log_info(f"Platform comparison: '{account_platform.lower()}' vs '{platform.lower() if platform else None}'")
                                         
                                         # 平台筛选 (不区分大小写)
                                         if platform is None or account_platform.lower() == platform.lower():
+                                            logger.log_info(f"Platform matches! Adding account {account}")
                                             # 检查是否已在列表中
                                             if not any(acc['id'] == account for acc in accounts):
                                                 accounts.append({
@@ -423,25 +414,20 @@ async def get_available_accounts(platform: Optional[str] = None):
                                                     "last_active": None,
                                                     "config": profile
                                                 })
+                                            else:
+                                                logger.log_info(f"Account {account} already in list, skipping")
+                                        else:
+                                            logger.log_info(f"Platform mismatch for {account}: '{account_platform}' != '{platform}'")
                                 except Exception as e:
                                     logger.log_error(f"Failed to read profile for account {account}: {e}")
-        
-        # 方法3：扫描state目录获取账号文件夹(向后兼容)
-        state_dir = "state"
-        if os.path.exists(state_dir):
-            for item in os.listdir(state_dir):
-                item_path = os.path.join(state_dir, item)
-                if os.path.isdir(item_path):
-                    # 检查是否已在列表中
-                    if not any(acc['id'] == item for acc in accounts):
-                        accounts.append({
-                            "id": item,
-                            "name": item,
-                            "platform": "unknown",
-                            "status": "legacy",
-                            "balance": 0.0,
-                            "last_active": None
-                        })
+                            else:
+                                logger.log_info(f"Profile file not found: {profile_file}")
+                        else:
+                            logger.log_info(f"Not a directory: {account_path}")
+                else:
+                    logger.log_info(f"Not a platform directory: {platform_path}")
+        else:
+            logger.log_error(f"Profiles directory not found: {profiles_dir}")
         
         logger.log_info(f"Total accounts found: {len(accounts)}")
         for acc in accounts:
@@ -451,6 +437,8 @@ async def get_available_accounts(platform: Optional[str] = None):
         
     except Exception as e:
         logger.log_error(f"获取可用账号失败: {e}")
+        import traceback
+        logger.log_error(f"Traceback: {traceback.format_exc()}")
         return {"accounts": []}
 
 @app.get("/api/accounts/{platform}")
@@ -475,16 +463,48 @@ async def get_accounts_by_platform(platform: str):
         logger.log_error(f"获取平台账号失败: {e}")
         return []
 
+@app.post("/api/accounts/test-connection")
+async def test_account_connection_generic(request: dict):
+    """测试账号平台连接 - 通用端点"""
+    try:
+        platform = request.get("platform")
+        account_id = request.get("account_id")
+        
+        if not platform or not account_id:
+            return {
+                "success": False,
+                "message": "缺少必要参数：platform或account_id",
+                "status": "missing_parameters"
+            }
+        
+        # 调用具体的账号测试函数
+        return await test_account_connection_impl(account_id, platform)
+    
+    except Exception as e:
+        logger.log_error(f"通用账号连接测试失败: {e}")
+        return {
+            "success": False,
+            "message": f"连接测试异常：{str(e)}",
+            "status": "test_error"
+        }
+
 @app.post("/api/accounts/{account_id}/test-connection")
 async def test_account_connection(account_id: str):
     """测试账号平台连接"""
+    return await test_account_connection_impl(account_id)
+
+async def test_account_connection_impl(account_id: str, platform_filter: str = None):
+    """测试账号平台连接的实现"""
     try:
         # 首先从新的profiles目录读取账号配置
-        profiles_dir = "profiles"
+        profiles_dir = os.path.join(project_root, "profiles")
         # 扫描平台目录找到账号
         account_config_path = None
+        found_platform = None
         for platform_dir in os.listdir(profiles_dir):
             if platform_dir.startswith('_'):
+                continue
+            if platform_filter and platform_dir.upper() != platform_filter.upper():
                 continue
             platform_path = os.path.join(profiles_dir, platform_dir)
             if os.path.isdir(platform_path):
@@ -493,6 +513,7 @@ async def test_account_connection(account_id: str):
                     config_file = os.path.join(account_path, 'profile.json')
                     if os.path.exists(config_file):
                         account_config_path = config_file
+                        found_platform = platform_dir
                         break
         
         if not account_config_path:
@@ -515,15 +536,40 @@ async def test_account_connection(account_id: str):
                 "status": "platform_not_specified"
             }
         
-        # 获取API密钥
-        api_credentials = profile.get('exchange_config', {}).get('credentials', {})
-        api_key = api_credentials.get('api_key')
-        api_secret = api_credentials.get('secret_key')
+        # 获取API密钥 - 支持两种配置方式
+        api_credentials = {}
+        api_key = None
+        api_secret = None
+        
+        # 方式1: 直接在profile.json中的exchange_config
+        if 'exchange_config' in profile and 'credentials' in profile['exchange_config']:
+            api_credentials = profile['exchange_config']['credentials']
+            api_key = api_credentials.get('api_key')
+            api_secret = api_credentials.get('secret_key')
+        
+        # 方式2: 通过api_config.path指向外部文件
+        elif 'api_config' in profile and 'path' in profile['api_config']:
+            api_config_path = os.path.join(project_root, profile['api_config']['path'])
+            if os.path.exists(api_config_path):
+                try:
+                    with open(api_config_path, 'r', encoding='utf-8') as f:
+                        api_config = json.load(f)
+                    api_credentials = api_config
+                    # 支持多种字段名格式
+                    api_key = (api_config.get('api_key') or 
+                              api_config.get('API_KEY') or
+                              api_config.get('apiKey'))
+                    api_secret = (api_config.get('secret_key') or 
+                                 api_config.get('api_secret') or
+                                 api_config.get('API_SECRET') or
+                                 api_config.get('secretKey'))
+                except Exception as e:
+                    logger.log_error(f"读取API配置文件失败: {e}")
         
         if not api_key or not api_secret:
             return {
                 "success": False,
-                "message": "API密钥配置不完整",
+                "message": f"API密钥配置不完整 - 账号 {account_id}",
                 "status": "credentials_missing"
             }
         
@@ -540,17 +586,26 @@ async def test_account_connection(account_id: str):
             # 尝试进行基本的连接测试（获取账户信息或余额）
             # 由于这是示例账号，预期会失败
             try:
-                # 这里应该调用平台的健康检查方法
-                # 但由于是示例账号，我们直接模拟失败
+                # 调用平台的健康检查方法
                 test_result = platform_manager.health_check_platform(account_id, platform_name)
                 
-                return {
-                    "success": False,  # 示例账号预期失败
-                    "message": f"平台 {platform_name} 连接测试失败：API密钥无效或网络错误",
-                    "status": "connection_failed",
-                    "platform": platform_name,
-                    "details": test_result
-                }
+                # 检查连接测试结果
+                if test_result and test_result.get("status") == "healthy":
+                    return {
+                        "success": True,
+                        "message": f"平台 {platform_name} 连接成功",
+                        "status": "connected",
+                        "platform": platform_name,
+                        "details": test_result
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "message": f"平台 {platform_name} 连接测试失败：{test_result.get('error', 'Unknown error')}",
+                        "status": "connection_failed",
+                        "platform": platform_name,
+                        "details": test_result
+                    }
                 
             except Exception as conn_e:
                 return {
@@ -705,6 +760,56 @@ async def get_available_strategies():
         add_missing_feature("available_strategies", "可用策略列表获取功能需要完善")
         return {"strategies": []}
 
+@app.get("/api/strategies/{strategy_name}/templates")
+async def get_strategy_templates(strategy_name: str):
+    """获取指定策略的模板列表"""
+    try:
+        templates = plugin_loader.get_strategy_templates(strategy_name)
+        template_list = []
+        
+        for template_id, template_config in templates.items():
+            template_list.append({
+                "id": template_id,
+                "name": template_config.get("name", template_id),
+                "description": template_config.get("description", ""),
+                "risk_level": template_config.get("risk_level", "medium"),
+                "parameters": template_config.get("parameters", {}),
+                "recommended_capital": template_config.get("recommended_capital", 1000),
+                "max_drawdown_expected": template_config.get("max_drawdown_expected", 0.2),
+                "notes": template_config.get("notes", "")
+            })
+        
+        return {"templates": template_list}
+    except Exception as e:
+        logger.log_error(f"获取策略模板失败: {e}")
+        return {"templates": []}
+
+@app.get("/api/strategies/{strategy_name}/templates/{template_id}")
+async def get_strategy_template(strategy_name: str, template_id: str):
+    """获取指定策略的特定模板"""
+    try:
+        template = plugin_loader.get_strategy_template(strategy_name, template_id)
+        if not template:
+            raise HTTPException(status_code=404, detail=f"模板未找到: {strategy_name}/{template_id}")
+        
+        return {
+            "template": {
+                "id": template.get("id", template_id),
+                "name": template.get("name", template_id),
+                "description": template.get("description", ""),
+                "risk_level": template.get("risk_level", "medium"),
+                "parameters": template.get("parameters", {}),
+                "recommended_capital": template.get("recommended_capital", 1000),
+                "max_drawdown_expected": template.get("max_drawdown_expected", 0.2),
+                "notes": template.get("notes", "")
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.log_error(f"获取策略模板失败: {e}")
+        raise HTTPException(status_code=500, detail="服务器内部错误")
+
 @app.post("/api/instances/create")
 async def create_instance(request: CreateInstanceRequest):
     """创建新的交易实例"""
@@ -733,6 +838,13 @@ async def create_instance(request: CreateInstanceRequest):
             strategy_name=request.strategy,
             params=final_params
         )
+        
+        # 获取创建的实例并设置平台信息
+        strategy_instance = strategy_manager.get_strategy_instance(request.account_id, instance_id)
+        if strategy_instance:
+            strategy_instance.platform = request.platform
+            strategy_instance.strategy_name = request.strategy
+            strategy_instance.parameters = final_params
         
         # 自动启动策略实例
         start_success = strategy_manager.start_strategy(request.account_id, instance_id)

@@ -55,6 +55,7 @@ import {
   Target,
 } from "lucide-react";
 import { cn } from "./ui/utils";
+import { getStrategyDisplayName } from "../utils/strategyNames";
 
 interface Position {
   long: {
@@ -74,14 +75,42 @@ interface Position {
 }
 
 interface InstanceParameters {
-  maxPosition: number;
-  riskLevel: number;
-  stopLoss: number;
-  takeProfit: number;
+  // 多头参数
+  long: {
+    first_qty: number;
+    add_ratio: number;
+    add_interval: number;
+    max_add_times: number;
+    tp_first_order: number;
+    tp_before_full: number;
+    tp_after_full: number;
+  };
+  // 空头参数
+  short: {
+    first_qty: number;
+    add_ratio: number;
+    add_interval: number;
+    max_add_times: number;
+    tp_first_order: number;
+    tp_before_full: number;
+    tp_after_full: number;
+  };
+  // 对冲参数
+  hedge: {
+    trigger_loss: number;
+    equal_eps: number;
+    min_wait_seconds: number;
+    release_tp_after_full: {
+      long: number;
+      short: number;
+    };
+    release_sl_loss_ratio: {
+      long: number;
+      short: number;
+    };
+  };
   autoTrade: boolean;
   notifications: boolean;
-  gridSpacing: number;
-  maxGrids: number;
 }
 
 interface TradingInstance {
@@ -167,6 +196,78 @@ export function CurrentRunning() {
   const [isCreating, setIsCreating] = useState(false);
   
   const { toast } = useToast();
+
+  // 转换API参数到UI参数结构
+  const convertToUIParameters = (apiParams: any): InstanceParameters => {
+    if (!apiParams) {
+      // 返回默认参数
+      return {
+        long: {
+          first_qty: 0.01,
+          add_ratio: 2.0,
+          add_interval: 0.02,
+          max_add_times: 3,
+          tp_first_order: 0.01,
+          tp_before_full: 0.015,
+          tp_after_full: 0.02
+        },
+        short: {
+          first_qty: 0.01,
+          add_ratio: 2.0,
+          add_interval: 0.02,
+          max_add_times: 3,
+          tp_first_order: 0.01,
+          tp_before_full: 0.015,
+          tp_after_full: 0.02
+        },
+        hedge: {
+          trigger_loss: 0.05,
+          equal_eps: 0.01,
+          min_wait_seconds: 60,
+          release_tp_after_full: { long: 0.02, short: 0.02 },
+          release_sl_loss_ratio: { long: 1.0, short: 1.0 }
+        },
+        autoTrade: true,
+        notifications: true
+      };
+    }
+    
+    // 如果已经是正确的结构，直接返回
+    if (apiParams.long && apiParams.short && apiParams.hedge) {
+      return apiParams;
+    }
+    
+    // 否则返回默认值
+    return {
+      long: {
+        first_qty: apiParams.first_qty || 0.01,
+        add_ratio: apiParams.add_ratio || 2.0,
+        add_interval: apiParams.add_interval || 0.02,
+        max_add_times: apiParams.max_add_times || 3,
+        tp_first_order: apiParams.tp_first_order || 0.01,
+        tp_before_full: apiParams.tp_before_full || 0.015,
+        tp_after_full: apiParams.tp_after_full || 0.02
+      },
+      short: {
+        first_qty: apiParams.first_qty || 0.01,
+        add_ratio: apiParams.add_ratio || 2.0,
+        add_interval: apiParams.add_interval || 0.02,
+        max_add_times: apiParams.max_add_times || 3,
+        tp_first_order: apiParams.tp_first_order || 0.01,
+        tp_before_full: apiParams.tp_before_full || 0.015,
+        tp_after_full: apiParams.tp_after_full || 0.02
+      },
+      hedge: {
+        trigger_loss: apiParams.trigger_loss || 0.05,
+        equal_eps: apiParams.equal_eps || 0.01,
+        min_wait_seconds: apiParams.min_wait_seconds || 60,
+        release_tp_after_full: { long: 0.02, short: 0.02 },
+        release_sl_loss_ratio: { long: 1.0, short: 1.0 }
+      },
+      autoTrade: apiParams.autoTrade ?? true,
+      notifications: apiParams.notifications ?? true
+    };
+  };
 
   // 从API获取运行实例
   const fetchRunningInstances = async () => {
@@ -284,7 +385,7 @@ export function CurrentRunning() {
         toast({
           type: "success",
           title: "实例创建成功",
-          description: `策略 ${result.strategy} 实例已创建`,
+          description: `策略 ${getStrategyDisplayName(result.strategy)} 实例已创建`,
         });
         setShowCreateDialog(false);
         // 重置表单和相关状态
@@ -372,7 +473,7 @@ export function CurrentRunning() {
     status: apiInstance.status,
     owner: apiInstance.account, // 使用account作为owner
     profit: apiInstance.profit || 0,
-    tradingPair: "BTC/USDT", // 默认交易对，API暂不支持
+    tradingPair: apiInstance.symbol || "BTC/USDT", // 使用API返回的交易对信息，如果没有则使用默认值
     pid: Math.floor(Math.random() * 99999), // 模拟PID
     createdAt: new Date().toLocaleString("zh-CN"),
     runningTime: apiInstance.runtime || 0,
@@ -397,7 +498,7 @@ export function CurrentRunning() {
       long: null,
       short: null,
     },
-    logs: [`策略 ${apiInstance.strategy} 运行中...`],
+    logs: [`策略 ${getStrategyDisplayName(apiInstance.strategy)} 运行中...`],
     parameters: apiInstance.parameters || {
       maxPosition: 50,
       riskLevel: 50,
@@ -531,34 +632,58 @@ export function CurrentRunning() {
   const handleAccountChange = async (accountId: string) => {
     setCreateForm(prev => ({...prev, account: accountId}));
     
-    // 测试账号连接
+    console.log('账号变更:', accountId);
+    
     try {
-      const testResponse = await fetch(`http://localhost:8001/api/accounts/${accountId}/test-connection`, {
-        method: 'POST'
+      const testResponse = await fetch(`http://localhost:8001/api/accounts/test-connection`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          platform: createForm.platform,
+          account_id: accountId
+        })
       });
+      
+      console.log('连接测试响应状态:', testResponse.status);
       
       if (testResponse.ok) {
         const result = await testResponse.json();
-        if (result.connected) {
+        console.log('连接测试结果:', result);
+        
+        if (result.success) {
           toast({
             type: "success",
             title: "账号连接成功",
-            description: `${result.account_name || accountId} 连接正常`,
+            description: `${accountId} 连接正常`,
           });
         } else {
-          toast({
-            type: "error",
-            title: "账号连接失败",
-            description: result.error || "无法连接到交易平台",
-          });
+          // 处理示例账号的预期失败情况
+          if (result.status === "connection_failed" && 
+              (result.message.includes("401") || result.message.includes("API密钥无效"))) {
+            toast({
+              type: "warning", 
+              title: "示例账号已选择",
+              description: `${accountId} - 这是示例账号，API密钥无效但可用于演示`,
+            });
+          } else {
+            toast({
+              type: "error",
+              title: "账号连接失败",
+              description: result.message || "无法连接到交易平台",
+            });
+          }
         }
+      } else {
+        throw new Error(`HTTP ${testResponse.status}`);
       }
     } catch (error) {
       console.error('测试账号连接失败:', error);
       toast({
         type: "error",
         title: "连接测试失败",
-        description: "无法测试账号连接",
+        description: "无法测试账号连接，请检查API服务器状态",
       });
     }
   };
@@ -716,7 +841,7 @@ export function CurrentRunning() {
                   <SelectContent>
                     {availableStrategies.map((strategy: StrategyInfo) => (
                       <SelectItem key={strategy.id} value={strategy.id}>
-                        {strategy.name}
+                        {getStrategyDisplayName(strategy.id)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -833,7 +958,7 @@ export function CurrentRunning() {
                         策略
                       </span>
                       <p className="font-medium">
-                        {instance.strategy}
+                        {getStrategyDisplayName(instance.strategy)}
                       </p>
                     </div>
                     <div>
@@ -1298,7 +1423,7 @@ export function CurrentRunning() {
           instanceId={settingsInstance.id}
           instanceName={settingsInstance.account}
           platform={settingsInstance.platform}
-          currentParameters={settingsInstance.parameters}
+          currentParameters={convertToUIParameters(settingsInstance.parameters)}
           onParametersChange={(params) =>
             handleParametersChange(settingsInstance.id, params)
           }
