@@ -69,6 +69,13 @@
     "detailed_trades": true
   },
   
+  "safety": {
+    "require_manual_start": true,
+    "auto_stop_on_error": true,
+    "max_consecutive_losses": 5,
+    "circuit_breaker_enabled": true
+  },
+  
   "customization": {
     "_comment": "BN1602账号特定调整",
     "account_specific_notes": "解套策略备用配置，需要时启用",

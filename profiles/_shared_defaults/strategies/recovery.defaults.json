@@ -1,11 +1,11 @@
 {
   "_comment": "解套策略全局默认参数模板",
-  "_description": "复制此文件到具体账号的strategies目录并根据需要调整参�?,
+  "_description": "复制此文件到具体账号的strategies目录并根据需要调整参数",
   
   "strategy": {
     "name": "recovery",
     "version": "2.0.0",
-    "description": "解套策略 - 针对被套持仓的解套操�?
+    "description": "解套策略 - 针对被套持仓的解套操作"
   },
   
   "recovery": {
@@ -66,5 +66,13 @@
     "enable_alerts": true,
     "alert_channels": ["log"],
     "detailed_trades": true
+  },
+  
+  "safety": {
+    "require_manual_start": true,
+    "auto_stop_on_error": true,
+    "max_consecutive_losses": 5,
+    "circuit_breaker_enabled": true,
+    "circuit_breaker_max_drawdown": 0.08
   }
 }

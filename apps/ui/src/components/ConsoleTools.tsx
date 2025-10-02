@@ -5,6 +5,8 @@ import { Input } from "./ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { ScrollArea } from "./ui/scroll-area";
 import { Terminal, Calculator, Database, BarChart3, Send } from "lucide-react";
+import { getStrategyDisplayName } from "../utils/strategyNames";
+import apiService from "../services/apiService";
 
 export function ConsoleTools() {
   const [consoleOutput, setConsoleOutput] = useState<string[]>([
@@ -31,16 +33,17 @@ export function ConsoleTools() {
     
     // 尝试从API获取系统信息
     if (cmd === 'status') {
-      fetch('http://localhost:8001/health')
-        .then(response => response.json())
-        .then(data => {
-          const apiOutput = [
-            ...newOutput,
-            `系统状态: ${data.status}`,
-            `API时间: ${data.timestamp}`,
-            `缺失功能数: ${data.missing_features}`
-          ];
-          setConsoleOutput(apiOutput);
+      apiService.getSystemHealth()
+        .then(result => {
+          if (result.success && result.data) {
+            const apiOutput = [
+              ...newOutput,
+              `系统状态: ${result.data.status}`,
+              `API时间: ${result.data.timestamp}`,
+              `缺失功能数: ${result.data.missing_features}`
+            ];
+            setConsoleOutput(apiOutput);
+          }
         })
         .catch(() => {
           setConsoleOutput([...newOutput, "系统状态: API连接失败", "活跃实例: 无法获取", "总盈亏: 无法获取"]);
@@ -49,17 +52,18 @@ export function ConsoleTools() {
     }
     
     if (cmd === 'accounts') {
-      fetch('http://localhost:8001/api/dashboard/summary')
-        .then(response => response.json())
-        .then(data => {
-          const apiOutput = [
-            ...newOutput,
-            "账户列表:",
-            ...data.accounts.map((account: any, index: number) => 
-              `  ${index + 1}. ${account.platform}-${account.id} (${account.status})`
-            )
-          ];
-          setConsoleOutput(apiOutput);
+      apiService.getDashboardSummary()
+        .then(result => {
+          if (result.success && result.data) {
+            const apiOutput = [
+              ...newOutput,
+              "账户列表:",
+              ...result.data.accounts.map((account: any, index: number) => 
+                `  ${index + 1}. ${account.platform}-${account.id} (${account.status})`
+              )
+            ];
+            setConsoleOutput(apiOutput);
+          }
         })
         .catch(() => {
           setConsoleOutput([...newOutput, "账户列表:", "  API连接失败，无法获取账户信息"]);
@@ -68,17 +72,18 @@ export function ConsoleTools() {
     }
     
     if (cmd === 'strategies') {
-      fetch('http://localhost:8001/api/strategies/available')
-        .then(response => response.json())
-        .then(data => {
-          const apiOutput = [
-            ...newOutput,
-            "可用策略:",
-            ...data.strategies.map((strategy: any) => 
-              `  - ${strategy.name} (v${strategy.version})`
-            )
-          ];
-          setConsoleOutput(apiOutput);
+      apiService.getAvailableStrategies()
+        .then(result => {
+          if (result.success && result.data) {
+            const apiOutput = [
+              ...newOutput,
+              "可用策略:",
+              ...result.data.strategies.map((strategy: any) => 
+                `  - ${getStrategyDisplayName(strategy.name)} (v${strategy.version})`
+              )
+            ];
+            setConsoleOutput(apiOutput);
+          }
         })
         .catch(() => {
           setConsoleOutput([...newOutput, "可用策略:", "  API连接失败，无法获取策略信息"]);

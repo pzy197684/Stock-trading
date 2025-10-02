@@ -1,0 +1,43 @@
+{
+  "id": "aggressive",
+  "name": "激进型",
+  "description": "高风险、高收益的马丁对冲参数配置",
+  "strategy": "martingale_hedge",
+  "risk_level": "high",
+  "parameters": {
+    "long": {
+      "first_qty": 0.02,
+      "add_ratio": 3.0,
+      "add_interval": 0.015,
+      "max_add_times": 5,
+      "tp_first_order": 0.008,
+      "tp_before_full": 0.012,
+      "tp_after_full": 0.018
+    },
+    "short": {
+      "first_qty": 0.02,
+      "add_ratio": 3.0,
+      "add_interval": 0.015,
+      "max_add_times": 5,
+      "tp_first_order": 0.008,
+      "tp_before_full": 0.012,
+      "tp_after_full": 0.018
+    },
+    "hedge": {
+      "trigger_loss": 0.03,
+      "equal_eps": 0.005,
+      "min_wait_seconds": 30,
+      "release_tp_after_full": {
+        "long": 0.015,
+        "short": 0.015
+      },
+      "release_sl_loss_ratio": {
+        "long": 0.8,
+        "short": 0.8
+      }
+    }
+  },
+  "recommended_capital": 5000,
+  "max_drawdown_expected": 0.40,
+  "notes": "适合经验丰富的激进型交易者，追求高收益但承担高风险，最大回撤可能达到40%"
+}

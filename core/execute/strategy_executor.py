@@ -87,27 +87,8 @@ def run_loop(poll_interval: float = 1.0):
                 default_account = "DEFAULT"
                 platform = pm.get_platform(platform_name, default_account)
             except Exception as e:
-                logger.log_warning(f"无法获取平台实例 {platform_name}: {e}; 使用 MockPlatform 进行 dry-run")
-                # lightweight mock platform to avoid real API calls during smoke-run
-                class MockPlatform:
-                    def __init__(self):
-                        self.api_key = DefaultValue.MOCK_API_KEY
-                        self.api_secret = DefaultValue.MOCK_API_SECRET
-                    def name(self):
-                        return DefaultValue.MOCK_PLATFORM
-                    def capabilities(self):
-                        return {ConfigKey.HEDGE_MODE: False}
-                    def get_position(self, symbol: str):
-                        return {ConfigKey.SYMBOL: symbol, "qty": 0}
-                    def to_instrument(self, s):
-                        return s[:-4] if s.endswith("USDT") else s
-                    def place_order(self, req: dict):
-                        return {"orderId": "mock_order_1", "status": "NEW", "req": req}
-                    def cancel_order(self, order_id: str):
-                        return {"orderId": order_id, "status": "canceled"}
-                    def close_position(self, *args, **kwargs):
-                        return {"orderId": "mock_close_1"}
-                platform = MockPlatform()
+                logger.log_error(f"无法获取平台实例 {platform_name}: {e}")
+                raise e  # 实盘环境必须有正确的平台配置
 
             resp = place_order(cast(ExchangeIf, platform), order_req)
             logger.log_info(f"order response: {resp}")

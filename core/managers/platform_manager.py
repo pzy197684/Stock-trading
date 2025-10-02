@@ -4,7 +4,7 @@ from typing import Optional, Dict, List, Any
 import os
 
 from core.platform.base import ExchangeIf
-from core.config_loader import load_api_keys
+from core.config_loader import load_api_keys, load_api_config
 from core.logger import logger
 from core.utils.plugin_loader import get_plugin_loader
 from core.state_store import get_state_manager
@@ -86,14 +86,35 @@ class PlatformManager:
         if not platform_class:
             raise ValueError(f"Platform not found or failed to load: {platform_name}")
         
-        # 获取API密钥
+        # 获取API密钥和配置
         if not api_key or not api_secret:
             try:
-                loaded_key, loaded_secret = load_api_keys(exchange=platform_name, account=account)
-                api_key = api_key or loaded_key
-                api_secret = api_secret or loaded_secret
+                # 首先尝试加载完整配置
+                api_config = load_api_config(exchange=platform_name, account=account)
+                if api_config:
+                    api_key = api_key or (api_config.get("API_KEY") or api_config.get("apiKey"))
+                    api_secret = api_secret or (api_config.get("API_SECRET") or api_config.get("apiSecret"))
+                    
+                    # 检查是否是testnet环境
+                    settings = api_config.get("settings", {})
+                    if settings.get("testnet") and platform_name.lower() == "binance":
+                        extra_params = extra_params or {}
+                        extra_params["testnet"] = True
+                        logger.log_info(f"Detected testnet configuration for {account}/{platform_name}")
+                else:
+                    # 回退到仅加载密钥
+                    loaded_key, loaded_secret = load_api_keys(exchange=platform_name, account=account)
+                    api_key = api_key or loaded_key
+                    api_secret = api_secret or loaded_secret
             except Exception as e:
-                logger.log_warning(f"Failed to load API keys for {account}/{platform_name}: {e}")
+                logger.log_warning(f"Failed to load API config for {account}/{platform_name}: {e}")
+                # 回退到仅加载密钥
+                try:
+                    loaded_key, loaded_secret = load_api_keys(exchange=platform_name, account=account)
+                    api_key = api_key or loaded_key
+                    api_secret = api_secret or loaded_secret
+                except Exception as e2:
+                    logger.log_warning(f"Failed to load API keys for {account}/{platform_name}: {e2}")
 
         if not api_key or not api_secret:
             raise ValueError(f"API keys for account='{account}', platform='{platform_name}' not found")
@@ -309,7 +330,9 @@ class PlatformManager:
             # 基础连接测试（尝试获取账户信息）
             if hasattr(instance, 'get_account_info'):
                 result = instance.get_account_info()
+                logger.log_info(f"[HealthCheck] {account}/{platform_name} get_account_info result: {result}")
                 if result.get("error"):
+                    logger.log_warning(f"[HealthCheck] {account}/{platform_name} API error: {result}")
                     return {
                         "status": "unhealthy",
                         "error": result.get("reason", "Unknown error"),

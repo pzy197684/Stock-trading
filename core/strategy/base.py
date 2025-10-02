@@ -52,6 +52,7 @@ class StrategyContext:
     balance: Dict[str, Any]               # 余额信息
     market_data: Optional[Dict[str, Any]] = None    # 市场数据
     custom_data: Optional[Dict[str, Any]] = None    # 自定义数据
+    exchange: Optional[Any] = None        # 交易所实例，用于下单操作
     
     def __post_init__(self):
         if self.market_data is None:

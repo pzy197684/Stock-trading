@@ -1,0 +1,18 @@
+﻿{
+  "id": "balanced",
+  "name": "平衡型",
+  "description": "风险与收益平衡的回撤恢复参数配置",
+  "strategy": "recovery",
+  "risk_level": "medium",
+  "parameters": {
+    "max_recovery_attempts": 5,
+    "recovery_multiplier": 1.5,
+    "stop_loss_threshold": 0.08,
+    "profit_target": 0.05,
+    "cooldown_period": 180,
+    "position_size": 0.015
+  },
+  "recommended_capital": 1500,
+  "max_drawdown_expected": 0.20,
+  "notes": "平衡的回撤恢复策略，适合中等风险偏好的交易者，回撤控制适中"
+}

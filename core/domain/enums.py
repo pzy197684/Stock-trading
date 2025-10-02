@@ -111,9 +111,6 @@ class DefaultValue(str, Enum):
     PLATFORM = "coinw"
     STRATEGY_NAME = "martingale_v3"
     STRATEGY_DISPLAY_NAME = "Martingale Strategy"
-    MOCK_API_KEY = "mock"
-    MOCK_API_SECRET = "mock"
-    MOCK_PLATFORM = "Mock"
     LOG_CATEGORY = "stock_trading"
 
 # 时间常量

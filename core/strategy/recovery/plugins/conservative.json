@@ -1,0 +1,18 @@
+{
+  "id": "conservative",
+  "name": "保守型",
+  "description": "低风险、稳健回撤恢复的参数配置",
+  "strategy": "recovery",
+  "risk_level": "low",
+  "parameters": {
+    "max_recovery_attempts": 3,
+    "recovery_multiplier": 1.2,
+    "stop_loss_threshold": 0.05,
+    "profit_target": 0.03,
+    "cooldown_period": 300,
+    "position_size": 0.01
+  },
+  "recommended_capital": 800,
+  "max_drawdown_expected": 0.12,
+  "notes": "保守的回撤恢复策略，适合稳健型交易者，回撤控制严格"
+}

@@ -1,5 +1,5 @@
-{
-  "_comme    "description": "DEEPCOIN解套策略专用账户（介929项目迁移）",t": "DC1001 DEEPCOI      "description": "DEEPCOIN解套策略（介929迁移）"解套策略账号主配置文件",
+﻿{
+  "_comment": "DC1001 DEEPCOIN解套策略账号主配置文件",
   "_description": "账号入口点和策略索引 - 929迁移",
   "_created": "2025-09-30",
   
@@ -10,9 +10,10 @@
     "platform": "deepcoin",
     "environment": "production",
     "status": "active",
-    "description": "DEEPCOIN解套策略专用账户（从929项目迁移�?,
+    "description": "DEEPCOIN解套策略专用账户（从929项目迁移）",
     "created_date": "2025-09-30",
-    "last_modified": "2025-09-30"
+    "last_modified": "2025-09-30",
+    "owner": "潘正友"
   },
   
   "api_config": {
@@ -21,33 +22,12 @@
     "connection_type": "rest_websocket"
   },
   
-  "settings": {
-    "config_file": "profiles/DEEP/DC1001/account_settings.json"
-  },
-  
   "available_strategies": [
     {
       "name": "recovery",
       "config_file": "profiles/DEEP/DC1001/strategies/recovery.json",
       "status": "enabled",
-      "description": "DEEPCOIN解套策略（从929迁移�?
-    },
-    {
-      "name": "martingale_hedge",
-      "config_file": "profiles/DEEP/DC1001/strategies/martingale_hedge.json",
-      "status": "disabled",
-      "description": "DEEPCOIN马丁对冲策略（备用）"
+      "description": "DEEPCOIN解套策略（从929迁移）"
     }
-  ],
-  
-  "defaults": {
-    "strategy_templates": "profiles/_shared_defaults/strategies/",
-    "fallback_config": "profiles/_shared_defaults/account_settings.json"
-  },
-  
-  "metadata": {
-    "migration_source": "929/profiles/DEEPCOIN/DC1001/",
-    "migration_date": "2025-09-30",
-    "version": "1.0.0"
-  }
+  ]
 }

@@ -5,6 +5,8 @@
   "_account": "DC1001",
   "_migration_source": "929/profiles/DEEPCOIN/DC1001/",
   
+  "owner": "潘正友",
+  
   "api_config": {
     "api_key": "YOUR_DEEPCOIN_API_KEY_HERE",
     "api_secret": "YOUR_DEEPCOIN_API_SECRET_HERE",

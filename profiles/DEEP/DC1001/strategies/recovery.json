@@ -1,5 +1,5 @@
 {
-  "_comment": "DC1001 DEEPCOIN解套策略配置（从929迁移�?,
+  "_comment": "DC1001 DEEPCOIN解套策略配置（从929迁移）",
   "_derived_from": "profiles/_shared_defaults/strategies/recovery.defaults.json",
   "_migration_source": "929/profiles/DEEPCOIN/DC1001/config.json",
   "_status": "enabled",
@@ -7,7 +7,7 @@
   "strategy": {
     "name": "recovery",
     "version": "2.0.0",
-    "description": "解套策略 - DC1001�?29迁移"
+    "description": "解套策略 - DC1001从929迁移"
   },
   
   "symbol": "ORDIUSDT",
@@ -80,8 +80,15 @@
     "funding_interval": 8
   },
   
+  "safety": {
+    "require_manual_start": true,
+    "auto_stop_on_error": true,
+    "max_consecutive_losses": 5,
+    "circuit_breaker_enabled": true
+  },
+  
   "customization": {
-    "_comment": "DC1001账号特定调整 - �?29迁移",
+    "_comment": "DC1001账号特定调整 - �?29迁移",
     "account_specific_notes": "DEEPCOIN解套策略专用账号，从929项目迁移",
     "original_config_symbol": "ORDIUSDT",
     "last_tuned": "2025-09-30"

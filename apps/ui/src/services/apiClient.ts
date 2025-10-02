@@ -1,6 +1,27 @@
 // apps/ui/src/services/apiClient.ts
 // API 客户端服务，用于与后端API通信
 
+export interface AccountBalance {
+  account_id: string;
+  platform: string;
+  status: 'success' | 'error';
+  balance: number;
+  available_balance: number;
+  error?: string;
+  last_update?: string;
+}
+
+export interface BalanceSnapshot {
+  snapshot_time: string;
+  accounts: Record<string, {
+    platform: string;
+    status: 'success' | 'error';
+    balance: number;
+    available_balance: number;
+    error?: string;
+  }>;
+}
+
 export interface DashboardSummary {
   summary: {
     total_accounts: number;
@@ -36,6 +57,7 @@ export interface StrategyInstance {
   runtime: number;
   last_signal: string | null;
   parameters: Record<string, any>;
+  owner: string;  // 添加拥有人字段
 }
 
 export interface Platform {
@@ -203,6 +225,24 @@ class ApiClient {
         resolve({ output });
       }, 500);
     });
+  }
+
+  // 获取账户余额快照
+  async getBalanceSnapshot(): Promise<BalanceSnapshot> {
+    const response = await fetch(`${this.baseUrl}/accounts/balance-snapshot`);
+    if (!response.ok) {
+      throw new Error(`余额快照获取失败: ${response.status}`);
+    }
+    return response.json();
+  }
+
+  // 获取单个账户余额
+  async getAccountBalance(accountId: string): Promise<AccountBalance> {
+    const response = await fetch(`${this.baseUrl}/accounts/${accountId}/balance`);
+    if (!response.ok) {
+      throw new Error(`账户余额获取失败: ${response.status}`);
+    }
+    return response.json();
   }
 }
 

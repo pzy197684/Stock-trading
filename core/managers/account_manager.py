@@ -41,7 +41,7 @@ class AccountManager:
             raise FileNotFoundError(f"Account config not found: {config_file}")
         
         try:
-            with open(config_file, 'r', encoding='utf-8') as f:
+            with open(config_file, 'r', encoding='utf-8-sig') as f:
                 config = json.load(f)
             
             # 验证必要字段

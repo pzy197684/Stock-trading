@@ -37,13 +37,13 @@ class DirectionState:
     last_fill_price: float = 0.0        # 上次成交价格
     last_fill_ts: int = 0               # 上次成交时间戳
     last_open_ts: int = 0               # 上次开仓时间戳
-    add_history: List[Dict] = None      # 加仓历史
+    add_history: Optional[List[Dict]] = None      # 加仓历史
     round: int = 1                      # 轮次
     opposite_qty: float = 0.0           # 对侧持仓量
     fast_add_paused_until: int = 0      # 快速加仓暂停至
     
     # 锁仓相关状态
-    hedge_state: HedgeState = None
+    hedge_state: Optional[HedgeState] = None
     
     def __post_init__(self):
         if self.add_history is None:
@@ -88,55 +88,55 @@ class MartingaleHedgeStrategy(StrategyBase):
         ]
     
     def get_default_params(self) -> Dict[str, Any]:
-        """返回默认参数字典"""
+        """返回默认参数字典 - 使用安全的空值避免跨币种参数混用风险"""
         return {
-            'symbol': 'ETHUSDT',
+            'symbol': None,  # 强制要求用户指定交易对
             'order_type': 'MARKET',
             'interval': 5,  # 策略执行间隔（秒）
             
-            # 多头配置
+            # 多头配置 - 强制要求用户配置
             'long': {
-                'first_qty': 0.01,
-                'add_ratio': 2.0,
-                'add_interval': 0.02,
-                'max_add_times': 3,
-                'tp_first_order': 0.01,
-                'tp_before_full': 0.015,
-                'tp_after_full': 0.02
+                'first_qty': None,
+                'add_ratio': None,
+                'add_interval': None,
+                'max_add_times': None,
+                'tp_first_order': None,
+                'tp_before_full': None,
+                'tp_after_full': None
             },
             
-            # 空头配置  
+            # 空头配置 - 强制要求用户配置  
             'short': {
-                'first_qty': 0.01,
-                'add_ratio': 2.0,
-                'add_interval': 0.02,
-                'max_add_times': 3,
-                'tp_first_order': 0.01,
-                'tp_before_full': 0.015,
-                'tp_after_full': 0.02
+                'first_qty': None,
+                'add_ratio': None,
+                'add_interval': None,
+                'max_add_times': None,
+                'tp_first_order': None,
+                'tp_before_full': None,
+                'tp_after_full': None
             },
             
-            # 对冲配置
+            # 对冲配置 - 强制要求用户配置
             'hedge': {
-                'trigger_loss': 0.05,              # 触发对冲的浮亏比例
-                'equal_eps': 0.01,                 # 仓位平衡容差
-                'min_wait_seconds': 60,            # 锁仓后冷却时间
+                'trigger_loss': None,              # 触发对冲的浮亏比例
+                'equal_eps': None,                 # 仓位平衡容差
+                'min_wait_seconds': None,          # 锁仓后冷却时间
                 'release_tp_after_full': {         # 解锁止盈阈值
-                    'long': 0.02,
-                    'short': 0.02
+                    'long': None,
+                    'short': None
                 },
                 'release_sl_loss_ratio': {         # 解锁止损比例
-                    'long': 1.0,
-                    'short': 1.0
+                    'long': None,
+                    'short': None
                 }
             },
             
-            # 风控配置
+            # 风控配置 - 强制要求用户配置
             'risk_control': {
-                'tp_slippage': 0.002,             # 止盈滑点
-                'max_total_qty': 1.0,             # 最大总仓位
-                'cooldown_minutes': 1,            # 风控冷却时间
-                'fast_add_window': 300            # 快速加仓检测窗口（秒）
+                'tp_slippage': None,             # 止盈滑点
+                'max_total_qty': None,           # 最大总仓位
+                'cooldown_minutes': None,        # 风控冷却时间
+                'fast_add_window': None          # 快速加仓检测窗口（秒）
             }
         }
     
@@ -147,6 +147,22 @@ class MartingaleHedgeStrategy(StrategyBase):
         # 基础参数验证
         if 'symbol' not in params or not isinstance(params['symbol'], str):
             errors.append("缺少参数: symbol 或格式错误")
+        
+        # 交易配置验证
+        if 'trading' in params:
+            trading_config = params['trading']
+            
+            # 验证杠杆倍数
+            if 'leverage' in trading_config:
+                leverage = trading_config['leverage']
+                if not isinstance(leverage, (int, float)) or leverage <= 0 or leverage > 20:
+                    errors.append("leverage 必须是大于0且小于等于20的数字")
+            
+            # 验证交易模式
+            if 'mode' in trading_config:
+                mode = trading_config['mode']
+                if mode not in ['dual', 'long_only', 'short_only']:
+                    errors.append("mode 必须是 'dual', 'long_only' 或 'short_only' 之一")
             
         # 方向配置验证
         for direction in ['long', 'short']:
@@ -176,6 +192,30 @@ class MartingaleHedgeStrategy(StrategyBase):
             # 从配置加载精度参数
             hedge_config = self.params.get('hedge', {})
             self.equal_eps = float(hedge_config.get('equal_eps', 0.01))
+            
+            # 从交易配置获取杠杆和模式参数
+            trading_config = self.params.get('trading', {})
+            self.leverage = trading_config.get('leverage', 1)  # 默认1倍杠杆
+            self.trading_mode = trading_config.get('mode', 'dual')  # 默认双向模式
+            
+            # 验证交易模式
+            if self.trading_mode not in ['dual', 'long_only', 'short_only']:
+                logger.log_warning(f"无效的交易模式 {self.trading_mode}，使用默认值 'dual'")
+                self.trading_mode = 'dual'
+            
+            # 记录配置信息
+            logger.log_info(f"马丁对冲策略配置 - 杠杆: {self.leverage}x, 模式: {self.trading_mode}")
+            
+            # 设置杠杆倍数（如果不是默认值）
+            if self.leverage > 1 and hasattr(context, 'exchange') and context.exchange:
+                try:
+                    leverage_result = context.exchange.set_leverage(context.symbol, self.leverage)
+                    if leverage_result.get('error'):
+                        logger.log_warning(f"设置杠杆失败: {leverage_result.get('reason', 'unknown error')}")
+                    else:
+                        logger.log_info(f"✅ 杠杆设置成功: {context.symbol} -> {self.leverage}x")
+                except Exception as e:
+                    logger.log_warning(f"设置杠杆异常: {e}")
             
             # 初始化状态（这里应该从状态存储加载实际状态）
             self._load_state_from_storage(context)
@@ -217,13 +257,21 @@ class MartingaleHedgeStrategy(StrategyBase):
             if reset_signal:
                 return reset_signal
             
-            # 4. 处理多空两个方向
-            for direction in ['long', 'short']:
+            # 4. 处理多空两个方向（根据交易模式过滤）
+            directions_to_process = []
+            if self.trading_mode == 'dual':
+                directions_to_process = ['long', 'short']
+            elif self.trading_mode == 'long_only':
+                directions_to_process = ['long']
+            elif self.trading_mode == 'short_only':
+                directions_to_process = ['short']
+            
+            for direction in directions_to_process:
                 state = self.long_state if direction == 'long' else self.short_state
                 opposite_state = self.short_state if direction == 'long' else self.long_state
                 direction_config = self.params[direction]
                 
-                logger.log_info(f"🔍 开始处理方向：{direction}")
+                logger.log_info(f"🔍 开始处理方向：{direction} (模式: {self.trading_mode})")
                 
                 # 4.1 锁仓硬闸门：仅走解锁分支
                 if state.hedge_state.hedge_stop:
@@ -543,23 +591,27 @@ class MartingaleHedgeStrategy(StrategyBase):
     
     def _create_open_first_signal(self, symbol: str, direction: str, config: Dict) -> TradingSignal:
         """创建首仓开仓信号"""
-        qty = config.get("first_qty", 0.01)
+        base_qty = config.get("first_qty", 0.01)
+        # 应用杠杆倍数
+        qty = base_qty * self.leverage
         signal_type = SignalType.OPEN_LONG if direction == "long" else SignalType.OPEN_SHORT
         
         return TradingSignal(
             signal_type=signal_type,
             symbol=symbol,
             quantity=qty,
-            reason=f"{direction}方向首仓开仓"
+            reason=f"{direction}方向首仓开仓 (杠杆{self.leverage}x)"
         )
     
     def _create_add_position_signal(self, symbol: str, direction: str, state: DirectionState, 
                                    config: Dict, price: float) -> TradingSignal:
         """创建加仓信号"""
         # 计算加仓数量
-        first_qty = config.get("first_qty", 0.01)
+        base_first_qty = config.get("first_qty", 0.01)
         add_ratio = config.get("add_ratio", 2.0)
-        next_qty = first_qty * (add_ratio ** (state.add_times + 1))
+        base_next_qty = base_first_qty * (add_ratio ** (state.add_times + 1))
+        # 应用杠杆倍数
+        next_qty = base_next_qty * self.leverage
         
         signal_type = SignalType.ADD_LONG if direction == "long" else SignalType.ADD_SHORT
         
@@ -567,7 +619,7 @@ class MartingaleHedgeStrategy(StrategyBase):
             signal_type=signal_type,
             symbol=symbol,
             quantity=next_qty,
-            reason=f"{direction}方向第{state.add_times + 1}次加仓"
+            reason=f"{direction}方向第{state.add_times + 1}次加仓 (杠杆{self.leverage}x)"
         )
     
     def _create_take_profit_first_signal(self, symbol: str, direction: str, 
@@ -683,15 +735,15 @@ class MartingaleHedgeStrategy(StrategyBase):
         """从上下文更新状态快照"""
         # 更新多头状态
         long_pos = context.position_long or {}
-        self.long_state.qty = float(long_pos.get(PositionField.QUANTITY.value, 0))
-        self.long_state.avg_price = float(long_pos.get(PositionField.AVERAGE_PRICE.value, 0))
-        self.long_state.opposite_qty = float(context.position_short.get(PositionField.QUANTITY.value, 0) or 0)
+        self.long_state.qty = float(long_pos.get(PositionField.QTY.value, 0))
+        self.long_state.avg_price = float(long_pos.get(PositionField.AVG_PRICE.value, 0))
+        self.long_state.opposite_qty = float(context.position_short.get(PositionField.QTY.value, 0) or 0)
         
         # 更新空头状态  
         short_pos = context.position_short or {}
-        self.short_state.qty = float(short_pos.get(PositionField.QUANTITY.value, 0))
-        self.short_state.avg_price = float(short_pos.get(PositionField.AVERAGE_PRICE.value, 0))
-        self.short_state.opposite_qty = float(context.position_long.get(PositionField.QUANTITY.value, 0) or 0)
+        self.short_state.qty = float(short_pos.get(PositionField.QTY.value, 0))
+        self.short_state.avg_price = float(short_pos.get(PositionField.AVG_PRICE.value, 0))
+        self.short_state.opposite_qty = float(context.position_long.get(PositionField.QTY.value, 0) or 0)
     
     def _load_state_from_storage(self, context: StrategyContext):
         """从存储加载状态 - 实际应用时需要实现持久化存储"""

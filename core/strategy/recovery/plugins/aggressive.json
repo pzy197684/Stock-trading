@@ -1,0 +1,18 @@
+﻿{
+  "id": "aggressive",
+  "name": "激进型",
+  "description": "高风险、快速恢复的参数配置",
+  "strategy": "recovery",
+  "risk_level": "high",
+  "parameters": {
+    "max_recovery_attempts": 8,
+    "recovery_multiplier": 2.0,
+    "stop_loss_threshold": 0.12,
+    "profit_target": 0.015,
+    "cooldown_period": 60,
+    "position_size": 0.03
+  },
+  "recommended_capital": 3000,
+  "max_drawdown_expected": 0.35,
+  "notes": "激进的回撤恢复策略，适合经验丰富的高风险交易者，快速恢复但风险较大"
+}

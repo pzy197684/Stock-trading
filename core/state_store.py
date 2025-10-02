@@ -112,7 +112,7 @@ class StateManager:
             return state
         
         try:
-            with open(state_file, 'r', encoding='utf-8') as f:
+            with open(state_file, 'r', encoding='utf-8-sig') as f:
                 state_dict = json.load(f)
             
             # 记录文件修改时间

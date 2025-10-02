@@ -1,17 +1,19 @@
 {
   "_comment": "马丁对冲策略全局默认参数模板",
-  "_description": "复制此文件到具体账号的strategies目录并根据需要调整参�?,
+  "_description": "复制此文件到具体账号的strategies目录并根据需要调整参数",
   
   "strategy": {
     "name": "martingale_hedge",
     "version": "3.0.0",
-    "description": "马丁对冲策略 - 双向开仓、动态加仓、对冲锁�?
+    "description": "马丁对冲策略 - 双向开仓、动态加仓、对冲锁仓"
   },
   
   "trading": {
-    "symbol": "ETHUSDT",
+    "symbol": "OPUSDT",
     "order_type": "MARKET",
     "interval": 5,
+    "leverage": 5,
+    "mode": "dual",
     
     "long": {
       "first_qty": 0.01,

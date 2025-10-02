@@ -1,4 +1,7 @@
 import { useState, useEffect } from "react";
+import { useApiData } from "../contexts/ApiContext";
+import apiService from "../services/apiService";
+import { DEFAULT_CONFIG } from "../config/defaults";
 import {
   Card,
   CardContent,
@@ -14,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
+import { Input } from "./ui/input";
 import {
   Dialog,
   DialogContent,
@@ -39,20 +43,20 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "./ui/collapsible";
-import { InstanceSettings } from "./InstanceSettings";
+import { InstanceSettings, InstanceParameters } from "./InstanceSettings";
 import { useToast } from "./ui/toast";
 import {
-  ChevronDown,
-  Plus,
-  Square,
-  AlertTriangle,
   Activity,
-  TrendingUp,
-  TrendingDown,
-  Settings,
+  AlertTriangle,
+  ChevronDown,
   Clock,
-  Zap,
+  Plus,
+  Settings,
+  Square,
   Target,
+  TrendingDown,
+  TrendingUp,
+  Zap,
 } from "lucide-react";
 import { cn } from "./ui/utils";
 import { getStrategyDisplayName } from "../utils/strategyNames";
@@ -72,45 +76,6 @@ interface Position {
     isLocked: boolean;
     isMaxPosition: boolean;
   };
-}
-
-interface InstanceParameters {
-  // 多头参数
-  long: {
-    first_qty: number;
-    add_ratio: number;
-    add_interval: number;
-    max_add_times: number;
-    tp_first_order: number;
-    tp_before_full: number;
-    tp_after_full: number;
-  };
-  // 空头参数
-  short: {
-    first_qty: number;
-    add_ratio: number;
-    add_interval: number;
-    max_add_times: number;
-    tp_first_order: number;
-    tp_before_full: number;
-    tp_after_full: number;
-  };
-  // 对冲参数
-  hedge: {
-    trigger_loss: number;
-    equal_eps: number;
-    min_wait_seconds: number;
-    release_tp_after_full: {
-      long: number;
-      short: number;
-    };
-    release_sl_loss_ratio: {
-      long: number;
-      short: number;
-    };
-  };
-  autoTrade: boolean;
-  notifications: boolean;
 }
 
 interface TradingInstance {
@@ -133,6 +98,12 @@ interface TradingInstance {
   };
   logs: string[];
   parameters: InstanceParameters;
+  statistics: {
+    daily_trades: number;
+    success_rate: number;
+    max_drawdown: number;
+    sharpe_ratio: number;
+  };
 }
 
 interface CreateForm {
@@ -176,26 +147,69 @@ export function CurrentRunning() {
     useState<TradingInstance | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   
-  // API数据状态
-  const [apiInstances, setApiInstances] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [apiError, setApiError] = useState<string | null>(null);
+  // 使用ApiContext的数据
+  const { 
+    runningInstances: apiInstances = [], 
+    error: apiError,
+    fetchRunningInstances,
+    stopStrategy
+  } = useApiData();
+  const isLoading = false; // ApiContext处理loading状态
+  
+  // 添加类型断言，确保TypeScript知道数据结构
+  const typedApiInstances = (apiInstances as any[]) || [];
   
   // 创建实例相关状态
   const [availablePlatforms, setAvailablePlatforms] = useState<PlatformInfo[]>([]);
   const [availableStrategies, setAvailableStrategies] = useState<StrategyInfo[]>([]);
   const [availableAccounts, setAvailableAccounts] = useState<AccountInfo[]>([]);
+  const [allOwners, setAllOwners] = useState<string[]>([]);
   const [availableSymbols, setAvailableSymbols] = useState<SymbolInfo[]>([]);
   const [accountsLoading, setAccountsLoading] = useState(false);
+  const [customSymbol, setCustomSymbol] = useState('');
+  const [symbolInputMode, setSymbolInputMode] = useState<'select' | 'input'>('select');
+  const [customSymbolHistory, setCustomSymbolHistory] = useState<string[]>([]);
   const [createForm, setCreateForm] = useState<CreateForm>({
     platform: '',
     account: '',
     strategy: '',
-    symbol: 'ETHUSDT'
+    symbol: DEFAULT_CONFIG.trading.symbol
   });
   const [isCreating, setIsCreating] = useState(false);
   
   const { toast } = useToast();
+
+  // 本地存储键名
+  const CUSTOM_SYMBOLS_KEY = 'trading_custom_symbols_history';
+  
+  // 加载自定义交易对历史
+  const loadCustomSymbolHistory = () => {
+    try {
+      const stored = localStorage.getItem(CUSTOM_SYMBOLS_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch (error) {
+      console.error('加载自定义交易对历史失败:', error);
+      return [];
+    }
+  };
+
+  // 保存自定义交易对到历史
+  const saveCustomSymbol = (symbol: string) => {
+    try {
+      const history = loadCustomSymbolHistory();
+      const newHistory = [symbol, ...history.filter((s: string) => s !== symbol)].slice(0, 20); // 最多保存20个
+      localStorage.setItem(CUSTOM_SYMBOLS_KEY, JSON.stringify(newHistory));
+      setCustomSymbolHistory(newHistory);
+    } catch (error) {
+      console.error('保存自定义交易对失败:', error);
+    }
+  };
+
+  // 初始化时加载历史记录
+  useEffect(() => {
+    const history = loadCustomSymbolHistory();
+    setCustomSymbolHistory(history);
+  }, []);
 
   // 转换API参数到UI参数结构
   const convertToUIParameters = (apiParams: any): InstanceParameters => {
@@ -232,9 +246,25 @@ export function CurrentRunning() {
       };
     }
     
-    // 如果已经是正确的结构，直接返回
+    // 如果已经是正确的结构，确保所有字段都有默认值
     if (apiParams.long && apiParams.short && apiParams.hedge) {
-      return apiParams;
+      return {
+        ...apiParams,
+        autoTrade: apiParams.autoTrade ?? true,
+        notifications: apiParams.notifications ?? true,
+        advanced: {
+          symbol: apiParams.symbol || 'OPUSDT',
+          leverage: apiParams.leverage || 5,
+          mode: apiParams.mode || 'dual',
+          order_type: apiParams.order_type || 'MARKET',
+          interval: apiParams.interval || 5,
+          max_daily_loss: apiParams.max_daily_loss || apiParams.risk_control?.max_daily_loss || 100.0,
+          emergency_stop_loss: apiParams.emergency_stop_loss || apiParams.risk_control?.emergency_stop_loss || 0.1,
+          enable_logging: apiParams.monitoring?.enable_logging ?? true,
+          enable_performance_monitoring: apiParams.monitoring?.enable_performance_monitoring ?? false,
+          enable_webhooks: apiParams.monitoring?.enable_webhooks ?? false
+        } as any  // 使用 any 避免类型冲突，因为这个对象会在其他地方被展开使用
+      };
     }
     
     // 否则返回默认值
@@ -269,32 +299,15 @@ export function CurrentRunning() {
     };
   };
 
-  // 从API获取运行实例
-  const fetchRunningInstances = async () => {
-    try {
-      setIsLoading(true);
-      setApiError(null);
-      const response = await fetch('http://localhost:8001/api/running/instances');
-      if (!response.ok) {
-        throw new Error(`API错误: ${response.status}`);
-      }
-      const data = await response.json();
-      setApiInstances(data.instances || []);
-    } catch (error) {
-      console.error('获取运行实例失败:', error);
-      setApiError('无法连接到API服务器');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   // 获取可用平台
   const fetchAvailablePlatforms = async () => {
     try {
-      const response = await fetch('http://localhost:8001/api/platforms/available');
-      if (!response.ok) throw new Error('获取平台列表失败');
-      const data = await response.json();
-      setAvailablePlatforms(data.platforms || []);
+      const result = await apiService.getAvailablePlatforms();
+      if (result.success && result.data) {
+        setAvailablePlatforms(result.data.platforms || []);
+      } else {
+        console.error('获取平台列表失败:', result.error);
+      }
     } catch (error) {
       console.error('获取平台列表失败:', error);
     }
@@ -303,12 +316,29 @@ export function CurrentRunning() {
   // 获取可用策略
   const fetchAvailableStrategies = async () => {
     try {
-      const response = await fetch('http://localhost:8001/api/strategies/available');
-      if (!response.ok) throw new Error('获取策略列表失败');
-      const data = await response.json();
-      setAvailableStrategies(data.strategies || []);
+      const result = await apiService.getAvailableStrategies();
+      if (result.success && result.data) {
+        setAvailableStrategies(result.data.strategies || []);
+      } else {
+        console.error('获取策略列表失败:', result.error);
+      }
     } catch (error) {
       console.error('获取策略列表失败:', error);
+    }
+  };
+
+  // 获取所有账号的拥有人信息
+  const fetchAllOwners = async () => {
+    try {
+      const result = await apiService.getAvailableAccounts();
+      if (result.success && result.data) {
+        const owners = Array.from(new Set(result.data.accounts.map((acc: any) => acc.owner).filter(Boolean))) as string[];
+        setAllOwners(owners);
+      } else {
+        console.error('获取账号列表失败:', result.error);
+      }
+    } catch (error) {
+      console.error('获取拥有人列表失败:', error);
     }
   };
 
@@ -359,40 +389,36 @@ export function CurrentRunning() {
 
     setIsCreating(true);
     try {
-      const response = await fetch('http://localhost:8001/api/instances/create', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          account_id: createForm.account,
-          platform: createForm.platform,
-          strategy: createForm.strategy,
-          symbol: createForm.symbol,
-          parameters: {
-            symbol: createForm.symbol
-          }
-        }),
-      });
+      const instanceData = {
+        account_id: createForm.account,
+        platform: createForm.platform,
+        strategy: createForm.strategy,
+        symbol: createForm.symbol,
+        parameters: {
+          symbol: createForm.symbol
+        }
+      };
       
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `创建失败: ${response.status}`);
-      }
+      const result = await apiService.createInstance(instanceData);
       
-      const result = await response.json();
-      if (result.success) {
+      if (result.success && result.data?.success) {
+        // 保存交易对到历史记录
+        if (createForm.symbol) {
+          saveCustomSymbol(createForm.symbol);
+        }
+        
         toast({
           type: "success",
           title: "实例创建成功",
-          description: `策略 ${getStrategyDisplayName(result.strategy)} 实例已创建`,
+          description: `策略 ${getStrategyDisplayName(result.data.strategy)} 实例已创建`,
         });
         setShowCreateDialog(false);
         // 重置表单和相关状态
         resetCreateForm();
-        fetchRunningInstances(); // 刷新数据
+        // 立即刷新数据显示
+        fetchRunningInstances();
       } else {
-        throw new Error(result.message || '创建失败');
+        throw new Error(result.error || result.data?.message || '创建失败');
       }
     } catch (error: any) {
       console.error('创建实例失败:', error);
@@ -406,40 +432,27 @@ export function CurrentRunning() {
     }
   };
 
-  // 停止策略
-  const stopStrategy = async (accountId: string, instanceId: string) => {
+  // 一键平仓并停止策略
+  const forceCloseAndStop = async (accountId: string, instanceId: string) => {
     try {
-      const response = await fetch('http://localhost:8001/api/strategy/stop', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          account_id: accountId,
-          instance_id: instanceId,
-        }),
-      });
+      const result = await apiService.forceStopInstance(accountId, instanceId);
       
-      if (!response.ok) {
-        throw new Error(`停止失败: ${response.status}`);
-      }
-      
-      const result = await response.json();
-      if (result.success) {
+      if (result.success && result.data?.success) {
         toast({
           type: "success",
-          title: "策略停止成功",
-          description: result.message,
+          title: "紧急平仓成功",
+          description: `平仓${result.data.details.positions_closed}个持仓，撤销${result.data.details.orders_cancelled}个订单`,
         });
-        fetchRunningInstances(); // 刷新数据
+        // 立即刷新数据显示
+        fetchRunningInstances();
       } else {
         throw new Error(result.message);
       }
     } catch (error) {
-      console.error('停止策略失败:', error);
+      console.error('紧急平仓失败:', error);
       toast({
         type: "error",
-        title: "停止失败",
+        title: "紧急平仓失败",
         description: (error as Error).message || '未知错误',
       });
     }
@@ -447,13 +460,11 @@ export function CurrentRunning() {
 
   // 初始化和定期刷新数据
   useEffect(() => {
-    fetchRunningInstances();
     fetchAvailablePlatforms();
     fetchAvailableStrategies();
+    fetchAllOwners(); // 加载所有拥有人信息
     // 不再默认加载账号和交易对，等待用户选择平台
-    
-    const interval = setInterval(fetchRunningInstances, 30000); // 每30秒刷新
-    return () => clearInterval(interval);
+    // 删除了重复的刷新逻辑，现在使用ApiContext统一管理
   }, []);
 
   // Update current time every second
@@ -464,21 +475,49 @@ export function CurrentRunning() {
     return () => clearInterval(timer);
   }, []);
 
+  // 添加自动刷新数据的效果
+  useEffect(() => {
+    // 立即执行一次刷新
+    fetchRunningInstances();
+    
+    const refreshTimer = setInterval(() => {
+      fetchRunningInstances(); // 每5秒刷新一次实例数据
+    }, 5000);
+    return () => clearInterval(refreshTimer);
+  }, [fetchRunningInstances]); // 现在fetchRunningInstances用useCallback包装，不会无限循环
+
   // 直接使用API数据
-  const instances = apiInstances.map(apiInstance => ({
+  const instances = typedApiInstances.map((apiInstance: any) => ({
     id: apiInstance.id,
     platform: apiInstance.platform,
     account: apiInstance.account,
     strategy: apiInstance.strategy,
     status: apiInstance.status,
-    owner: apiInstance.account, // 使用account作为owner
-    profit: apiInstance.profit || 0,
-    tradingPair: apiInstance.symbol || "BTC/USDT", // 使用API返回的交易对信息，如果没有则使用默认值
-    pid: Math.floor(Math.random() * 99999), // 模拟PID
-    createdAt: new Date().toLocaleString("zh-CN"),
-    runningTime: apiInstance.runtime || 0,
-    currentTime: currentTime.toLocaleString("zh-CN"),
-    positions: {
+    owner: apiInstance.owner || '未知', // 使用API返回的真实拥有人信息
+    profit: typeof apiInstance.profit === 'number' && !isNaN(apiInstance.profit) ? apiInstance.profit : 0,
+    tradingPair: apiInstance.tradingPair || apiInstance.symbol || "OP/USDT", // 使用API返回的交易对信息
+    pid: apiInstance.pid || (() => {
+      // 如果API没有返回PID，从字符串ID中提取数字部分作为备选
+      if (apiInstance.id) {
+        const match = apiInstance.id.toString().match(/(\d+)$/);
+        if (match) {
+          return parseInt(match[1], 10);
+        }
+      }
+      // 如果无法提取，使用哈希值
+      return Math.abs((apiInstance.platform + apiInstance.account + apiInstance.strategy).split('').reduce((a: number, b: string) => { a = ((a << 5) - a) + b.charCodeAt(0); return a & a; }, 0));
+    })(), // 优先使用API返回的真实PID
+    createdAt: apiInstance.createdAt || new Date().toLocaleString("zh-CN"),
+    runningTime: apiInstance.runningTime || (typeof apiInstance.runtime === 'number' && !isNaN(apiInstance.runtime) ? Math.floor(apiInstance.runtime / 60) : 0),
+    currentTime: currentTime.toLocaleString("zh-CN", { 
+      year: 'numeric', 
+      month: '2-digit', 
+      day: '2-digit', 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      second: '2-digit' 
+    }), // 始终使用本地实时时间，确保每秒更新
+    positions: apiInstance.positions || {
       long: {
         quantity: 0,
         avgPrice: 0,
@@ -494,7 +533,7 @@ export function CurrentRunning() {
         isMaxPosition: false,
       },
     },
-    liquidationPrice: {
+    liquidationPrice: apiInstance.liquidationPrice || {
       long: null,
       short: null,
     },
@@ -509,11 +548,22 @@ export function CurrentRunning() {
       gridSpacing: 0.5,
       maxGrids: 20,
     },
+    // 添加统计数据字段
+    statistics: {
+      daily_trades: apiInstance.daily_trades || 0,
+      success_rate: apiInstance.success_rate || 0,
+      max_drawdown: apiInstance.max_drawdown || 0,
+      sharpe_ratio: apiInstance.sharpe_ratio || 0,
+    },
   }));
 
+  // 合并运行实例的拥有人和所有账号的拥有人信息
   const owners = [
     "all",
-    ...Array.from(new Set(instances.map((i) => i.owner))),
+    ...Array.from(new Set([
+      ...instances.map((i) => i.owner),
+      ...allOwners
+    ])).filter(Boolean),
   ];
   const filteredInstances =
     selectedOwner === "all"
@@ -538,6 +588,12 @@ export function CurrentRunning() {
             运行中
           </Badge>
         );
+      case "initialized":
+        return (
+          <Badge className="bg-blue-100 text-blue-800 border-blue-200">
+            已初始化
+          </Badge>
+        );
       case "stopped":
         return (
           <Badge className="bg-gray-100 text-gray-800 border-gray-200">
@@ -556,25 +612,125 @@ export function CurrentRunning() {
   };
 
   const formatRunningTime = (minutes: number) => {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
+    const validMinutes = typeof minutes === 'number' && !isNaN(minutes) ? minutes : 0;
+    const hours = Math.floor(validMinutes / 60);
+    const mins = Math.floor(validMinutes % 60);
     return `${hours}小时${mins}分钟`;
   };
 
-  const handleParametersChange = (
+  const handleParametersChange = async (
     instanceId: string,
     newParameters: InstanceParameters,
   ) => {
-    // 对于API实例，这里应该调用更新参数的API
-    console.log('更新参数:', instanceId, newParameters);
-    // 暂时不支持API参数更新，记录待实现功能
+    try {
+      console.log('更新参数:', instanceId, newParameters);
+      console.log('前端传入的杠杆值:', (newParameters as any).leverage || newParameters.advanced?.leverage);
+      
+      // 将UI参数转换为API参数格式
+      // 注意：InstanceSettings传来的参数可能是展平结构，需要适配
+      const apiParameters = {
+        symbol: (newParameters as any).symbol || newParameters.advanced?.symbol || DEFAULT_CONFIG.trading.symbol,
+        leverage: (newParameters as any).leverage || newParameters.advanced?.leverage || DEFAULT_CONFIG.trading.leverage,
+        mode: (newParameters as any).mode || newParameters.advanced?.mode || DEFAULT_CONFIG.trading.mode,
+        order_type: (newParameters as any).order_type || newParameters.advanced?.order_type || DEFAULT_CONFIG.trading.order_type,
+        interval: (newParameters as any).interval || newParameters.advanced?.interval || DEFAULT_CONFIG.trading.interval,
+        long: newParameters.long,
+        short: newParameters.short,
+        hedge: newParameters.hedge,
+        safety: {
+          require_manual_start: (newParameters.advanced as any)?.require_manual_start ?? !newParameters.autoTrade,
+          auto_stop_on_error: (newParameters.advanced as any)?.auto_stop_on_error ?? DEFAULT_CONFIG.safety.auto_stop_on_error,
+          max_consecutive_losses: (newParameters.advanced as any)?.max_consecutive_losses ?? DEFAULT_CONFIG.safety.max_consecutive_losses,
+          circuit_breaker: {
+            enabled: (newParameters.advanced as any)?.circuit_breaker_enabled ?? DEFAULT_CONFIG.safety.circuit_breaker_enabled,
+            max_drawdown: (newParameters.advanced as any)?.circuit_breaker_max_drawdown ?? DEFAULT_CONFIG.safety.circuit_breaker_max_drawdown
+          }
+        },
+        risk_control: {
+          max_daily_loss: (newParameters as any).max_daily_loss || (newParameters.advanced?.max_daily_loss ?? DEFAULT_CONFIG.risk_control.max_daily_loss),
+          emergency_stop_loss: (newParameters as any).emergency_stop_loss || (newParameters.advanced?.emergency_stop_loss ?? DEFAULT_CONFIG.risk_control.emergency_stop_loss),
+          max_total_qty: (newParameters as any).max_total_qty || ((newParameters.advanced as any)?.max_total_qty ?? DEFAULT_CONFIG.risk_control.max_total_qty),
+          tp_slippage: (newParameters as any).tp_slippage || ((newParameters.advanced as any)?.tp_slippage ?? DEFAULT_CONFIG.risk_control.tp_slippage)
+        },
+        execution: {
+          max_slippage: (newParameters.advanced as any)?.max_slippage ?? DEFAULT_CONFIG.execution.max_slippage,
+          retry_attempts: (newParameters.advanced as any)?.retry_attempts ?? DEFAULT_CONFIG.execution.retry_attempts,
+          order_timeout: (newParameters.advanced as any)?.order_timeout ?? DEFAULT_CONFIG.execution.order_timeout,
+          enable_order_confirmation: (newParameters.advanced as any)?.enable_order_confirmation ?? DEFAULT_CONFIG.execution.enable_order_confirmation
+        },
+        monitoring: {
+          enable_logging: (newParameters as any).enable_logging || (newParameters.advanced?.enable_logging ?? DEFAULT_CONFIG.monitoring.enable_logging),
+          enable_alerts: (newParameters as any).enable_alerts || (newParameters.notifications ?? DEFAULT_CONFIG.monitoring.enable_alerts),
+          log_level: (newParameters as any).log_level || ((newParameters.advanced as any)?.log_level ?? DEFAULT_CONFIG.monitoring.log_level)
+        }
+      };
+      
+      console.log('发送到API的参数:', JSON.stringify(apiParameters, null, 2));
+      
+      // 调用API更新参数
+      const result = await apiService.updateInstanceParameters(instanceId, apiParameters);
+      
+      if (result.success && result.data?.success) {
+        console.log('参数更新成功');
+        // 重新加载实例列表以反映更新
+        await fetchRunningInstances();
+      } else {
+        console.error('运行实例更新失败:', result.error);
+        console.log('尝试直接更新配置文件...');
+        
+        // 如果运行实例更新失败，直接更新配置文件
+        // 从实例ID推断平台和账户信息
+        const platform = instanceId.startsWith('BN') ? 'BINANCE' : 
+                         instanceId.startsWith('CW') ? 'COINW' : 
+                         instanceId.startsWith('OK') ? 'OKX' : 'BINANCE';
+        const account = instanceId;
+        const strategy = 'martingale_hedge'; // 默认策略
+        
+        const configResult = await apiService.updateProfileConfig(platform, account, strategy, apiParameters);
+        
+        if (configResult.success) {
+          console.log('配置文件更新成功');
+          // 重新加载实例列表以反映更新
+          await fetchRunningInstances();
+        } else {
+          console.error('配置文件更新也失败:', configResult.error);
+          alert('参数保存失败，请检查控制台日志');
+        }
+      }
+    } catch (error) {
+      console.error('更新参数时发生错误:', error);
+    }
   };
 
-  const handleDeleteInstance = (instanceId: string) => {
-    // 对于API实例，调用停止策略API
-    const instance = instances.find(i => i.id === instanceId);
-    if (instance && apiInstances.length > 0) {
-      stopStrategy(instance.account, instanceId);
+  const handleDeleteInstance = async (instanceId: string) => {
+    try {
+      // 对于API实例，调用停止策略API
+      const instance = instances.find((i: any) => i.id === instanceId);
+      if (instance && typedApiInstances.length > 0) {
+        console.log('删除实例:', instanceId, '账号:', instance.account);
+        
+        // 调用ApiContext的stopStrategy方法
+        await stopStrategy(instance.account, instanceId);
+        
+        // 删除成功后刷新数据
+        await fetchRunningInstances();
+        
+        // 关闭设置对话框
+        setSettingsInstance(null);
+        
+        toast({
+          type: "success",
+          title: "实例删除成功",
+          description: `实例 ${instanceId} 已成功停止并删除`,
+        });
+      }
+    } catch (error) {
+      console.error('删除实例失败:', error);
+      toast({
+        type: "error",
+        title: "删除失败",
+        description: `删除实例 ${instanceId} 时发生错误`,
+      });
     }
   };
 
@@ -593,13 +749,12 @@ export function CurrentRunning() {
     // 加载该平台的交易对
     try {
       console.log('📡 Fetching symbols for platform:', platform);
-      const symbolsResponse = await fetch(`http://localhost:8001/api/symbols/available?platform=${platform}`);
-      if (symbolsResponse.ok) {
-        const data = await symbolsResponse.json();
-        console.log('✅ Symbols loaded:', data.symbols?.length || 0);
-        setAvailableSymbols(data.symbols || []);
+      const result = await apiService.getAvailableSymbols(platform);
+      if (result.success && result.data) {
+        console.log('✅ Symbols loaded:', result.data.symbols?.length || 0);
+        setAvailableSymbols(result.data.symbols || []);
       } else {
-        console.error('❌ Failed to load symbols, status:', symbolsResponse.status);
+        console.error('❌ Failed to load symbols:', result.error);
         setAvailableSymbols([]);
       }
     } catch (error) {
@@ -611,13 +766,12 @@ export function CurrentRunning() {
     try {
       setAccountsLoading(true);
       console.log('📡 Fetching accounts for platform:', platform);
-      const accountsResponse = await fetch(`http://localhost:8001/api/accounts/available?platform=${platform}`);
-      if (accountsResponse.ok) {
-        const data = await accountsResponse.json();
-        console.log('✅ Accounts loaded:', data.accounts?.length || 0, data.accounts);
-        setAvailableAccounts(data.accounts || []);
+      const result = await apiService.getAvailableAccounts(platform);
+      if (result.success && result.data) {
+        console.log('✅ Accounts loaded:', result.data.accounts?.length || 0, result.data.accounts);
+        setAvailableAccounts(result.data.accounts || []);
       } else {
-        console.error('❌ Failed to load accounts, status:', accountsResponse.status);
+        console.error('❌ Failed to load accounts:', result.error);
         setAvailableAccounts([]);
       }
     } catch (error) {
@@ -635,24 +789,19 @@ export function CurrentRunning() {
     console.log('账号变更:', accountId);
     
     try {
-      const testResponse = await fetch(`http://localhost:8001/api/accounts/test-connection`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          platform: createForm.platform,
-          account_id: accountId
-        })
-      });
+      const connectionData = {
+        platform: createForm.platform,
+        account_id: accountId
+      };
       
-      console.log('连接测试响应状态:', testResponse.status);
+      const result = await apiService.testConnection(connectionData);
       
-      if (testResponse.ok) {
-        const result = await testResponse.json();
-        console.log('连接测试结果:', result);
+      console.log('连接测试响应:', result);
+      
+      if (result.success && result.data) {
+        console.log('连接测试结果:', result.data);
         
-        if (result.success) {
+        if (result.data.success) {
           toast({
             type: "success",
             title: "账号连接成功",
@@ -660,8 +809,8 @@ export function CurrentRunning() {
           });
         } else {
           // 处理示例账号的预期失败情况
-          if (result.status === "connection_failed" && 
-              (result.message.includes("401") || result.message.includes("API密钥无效"))) {
+          if (result.data.status === "connection_failed" && 
+              (result.data.message?.includes("401") || result.data.message?.includes("API密钥无效"))) {
             toast({
               type: "warning", 
               title: "示例账号已选择",
@@ -671,12 +820,12 @@ export function CurrentRunning() {
             toast({
               type: "error",
               title: "账号连接失败",
-              description: result.message || "无法连接到交易平台",
+              description: result.data.message || "无法连接到交易平台",
             });
           }
         }
       } else {
-        throw new Error(`HTTP ${testResponse.status}`);
+        throw new Error(result.error || "连接测试失败");
       }
     } catch (error) {
       console.error('测试账号连接失败:', error);
@@ -777,22 +926,101 @@ export function CurrentRunning() {
                 <label className="text-sm font-medium">
                   交易对 *
                 </label>
-                <Select 
-                  value={createForm.symbol} 
-                  onValueChange={(value: string) => setCreateForm((prev: CreateForm) => ({...prev, symbol: value}))}
-                  disabled={!createForm.platform}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder={createForm.platform ? "选择交易对" : "请先选择平台"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableSymbols.map((symbol: SymbolInfo) => (
-                      <SelectItem key={symbol.symbol} value={symbol.symbol}>
-                        {symbol.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <Button
+                      type="button"
+                      variant={symbolInputMode === 'select' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setSymbolInputMode('select')}
+                    >
+                      选择
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={symbolInputMode === 'input' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setSymbolInputMode('input')}
+                    >
+                      手动输入
+                    </Button>
+                  </div>
+                  
+                  {symbolInputMode === 'select' ? (
+                    <Select 
+                      value={createForm.symbol} 
+                      onValueChange={(value: string) => setCreateForm((prev: CreateForm) => ({...prev, symbol: value}))}
+                      disabled={!createForm.platform}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder={createForm.platform ? "选择交易对" : "请先选择平台"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {/* 历史记录分组 */}
+                        {customSymbolHistory.length > 0 && (
+                          <>
+                            <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
+                              历史记录
+                            </div>
+                            {customSymbolHistory.map((symbol: string) => (
+                              <SelectItem key={`history-${symbol}`} value={symbol}>
+                                <div className="flex items-center space-x-2">
+                                  <span>{symbol}</span>
+                                  <span className="text-xs text-muted-foreground">(历史)</span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                            {availableSymbols.length > 0 && (
+                              <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground border-t">
+                                平台交易对
+                              </div>
+                            )}
+                          </>
+                        )}
+                        {/* 平台交易对 */}
+                        {availableSymbols.map((symbol: SymbolInfo) => (
+                          <SelectItem key={symbol.symbol} value={symbol.symbol}>
+                            {symbol.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="space-y-2">
+                      <Input
+                        value={customSymbol}
+                        onChange={(e) => setCustomSymbol(e.target.value.toUpperCase())}
+                        placeholder="输入交易对，如：BTCUSDT, ETHUSDT"
+                        className="w-full"
+                      />
+                      <div className="flex items-center space-x-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            if (customSymbol.trim()) {
+                              const symbol = customSymbol.trim();
+                              setCreateForm((prev: CreateForm) => ({...prev, symbol}));
+                              // 保存到历史记录
+                              saveCustomSymbol(symbol);
+                            }
+                          }}
+                          disabled={!customSymbol.trim()}
+                        >
+                          确认使用
+                        </Button>
+                        <span className="text-xs text-muted-foreground">
+                          当前: {createForm.symbol || '未选择'}
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        <p>• 输入格式：基础货币+计价货币，如 BTCUSDT、ETHUSDT</p>
+                        <p>• 请确保交易对在选定平台上可用</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
               <div>
                 <label className="text-sm font-medium">
@@ -904,11 +1132,11 @@ export function CurrentRunning() {
                   <div className="flex items-center justify-between gap-2 md:gap-4">
                     <div className="flex items-center gap-2 md:gap-4 flex-1 min-w-0">
                       <CardTitle className="text-base md:text-lg truncate">
-                        {instance.account}
+                        {instance.owner}
                       </CardTitle>
                       {getStatusBadge(instance.status)}
                       <span className="text-xs md:text-sm text-muted-foreground hidden sm:block">
-                        拥有人: {instance.owner}
+                        账号: {instance.account}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -927,7 +1155,7 @@ export function CurrentRunning() {
                         )}
                         <span className="font-medium">
                           {instance.profit >= 0 ? "+" : ""}
-                          {instance.profit.toFixed(2)} USDT
+                          {(typeof instance.profit === 'number' && !isNaN(instance.profit) ? instance.profit : 0).toFixed(2)} USDT
                         </span>
                       </div>
                     </div>
@@ -1092,13 +1320,13 @@ export function CurrentRunning() {
                           </AlertDialogCancel>
                           <AlertDialogAction
                             className="bg-destructive text-destructive-foreground"
-                            onClick={() =>
-                              toast({
-                                type: "success",
-                                title: "已平仓并停止",
-                                description: "所有持仓已清空",
-                              })
-                            }
+                            onClick={async () => {
+                              try {
+                                await forceCloseAndStop(instance.account, instance.id);
+                              } catch (error) {
+                                console.error('一键平仓失败:', error);
+                              }
+                            }}
                           >
                             确认平仓并停止
                           </AlertDialogAction>
@@ -1355,10 +1583,10 @@ export function CurrentRunning() {
                     详细状态
                   </h4>
                   <div className="grid grid-cols-2 gap-2 md:gap-4 text-xs md:text-sm">
-                    <div>今日交易次数: 42</div>
-                    <div>成功率: 78.5%</div>
-                    <div>最大回撤: -2.3%</div>
-                    <div>夏普比率: 1.65</div>
+                    <div>今日交易次数: {instance.statistics.daily_trades}</div>
+                    <div>成功率: {instance.statistics.success_rate.toFixed(1)}%</div>
+                    <div>最大回撤: {instance.statistics.max_drawdown.toFixed(1)}%</div>
+                    <div>夏普比率: {instance.statistics.sharpe_ratio.toFixed(2)}</div>
                   </div>
                 </div>
 

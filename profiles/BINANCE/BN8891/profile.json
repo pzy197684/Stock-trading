@@ -6,8 +6,9 @@
     "account_id": "BN8891",
     "display_name": "解套策略 - 币安8891",
     "platform": "binance",
-    "description": "Binance期货解套策略专用账号（从929项目迁移）",
-    "environment": "production"
+    "description": "Binance解套策略专用账户（介929项目迁移）",
+    "environment": "production",
+    "owner": "潘正友"
   },
   
   "api_config": {

@@ -90,11 +90,12 @@ class PluginLoader:
             self.core_path = Path(core_path)
         
         self.platform_plugins_path = self.core_path / "platform" / "plugins"
-        self.strategy_plugins_path = self.core_path / "strategy" / "plugins"
+        self.strategy_base_path = self.core_path / "strategy"  # 策略基础路径
         
         # 插件缓存
         self._platform_plugins: Dict[str, Dict[str, Any]] = {}
         self._strategy_plugins: Dict[str, Dict[str, Any]] = {}
+        self._strategy_templates: Dict[str, Dict[str, Dict[str, Any]]] = {}  # {strategy_name: {template_id: template_config}}
         
         # 类缓存
         self._platform_classes: Dict[str, Type] = {}
@@ -145,7 +146,7 @@ class PluginLoader:
     
     def scan_strategy_plugins(self, force_reload: bool = False) -> Dict[str, Dict[str, Any]]:
         """
-        扫描并加载策略插件
+        扫描并加载策略插件（支持新旧两种目录结构）
         
         Args:
             force_reload: 是否强制重新加载
@@ -158,28 +159,32 @@ class PluginLoader:
         
         self._strategy_plugins.clear()
         
-        if not self.strategy_plugins_path.exists():
-            logger.log_warning(f"Strategy plugins directory not found: {self.strategy_plugins_path}")
-            return {}
+        # 方法1：扫描新的目录结构 core/strategy/{strategy_name}/plugins/strategy.json
+        strategy_dirs = [d for d in self.strategy_base_path.iterdir() 
+                        if d.is_dir() and d.name not in ['plugins', '__pycache__']]
         
-        for plugin_file in self.strategy_plugins_path.glob("*.json"):
-            try:
-                config = self._load_plugin_config(plugin_file)
-                if not config:
-                    continue
-                
-                # 验证配置
-                valid, errors = PluginValidator.validate_strategy_plugin(config)
-                if not valid:
-                    logger.log_error(f"Invalid strategy plugin {plugin_file.name}: {errors}")
-                    continue
-                
-                plugin_name = config["name"]
-                self._strategy_plugins[plugin_name] = config
-                logger.log_info(f"✅ Loaded strategy plugin: {plugin_name}")
-                
-            except Exception as e:
-                logger.log_error(f"Failed to load strategy plugin {plugin_file.name}: {e}")
+        for strategy_dir in strategy_dirs:
+            strategy_plugins_dir = strategy_dir / "plugins"
+            if strategy_plugins_dir.exists():
+                strategy_file = strategy_plugins_dir / "strategy.json"
+                if strategy_file.exists():
+                    try:
+                        config = self._load_plugin_config(strategy_file)
+                        if not config:
+                            continue
+                        
+                        # 验证配置
+                        valid, errors = PluginValidator.validate_strategy_plugin(config)
+                        if not valid:
+                            logger.log_error(f"Invalid strategy plugin {strategy_file}: {errors}")
+                            continue
+                        
+                        plugin_name = config["name"]
+                        self._strategy_plugins[plugin_name] = config
+                        logger.log_info(f"✅ Loaded strategy plugin: {plugin_name} (from {strategy_dir.name})")
+                        
+                    except Exception as e:
+                        logger.log_error(f"Failed to load strategy plugin {strategy_file}: {e}")
         
         return self._strategy_plugins.copy()
     
@@ -297,17 +302,6 @@ class PluginLoader:
                     has_updates = True
                     self._file_mtimes[file_path] = current_mtime
         
-        # 检查策略插件文件
-        if self.strategy_plugins_path.exists():
-            for plugin_file in self.strategy_plugins_path.glob("*.json"):
-                file_path = str(plugin_file)
-                current_mtime = plugin_file.stat().st_mtime
-                cached_mtime = self._file_mtimes.get(file_path, 0)
-                
-                if current_mtime > cached_mtime:
-                    has_updates = True
-                    self._file_mtimes[file_path] = current_mtime
-        
         return has_updates
     
     def _load_plugin_config(self, plugin_file: Path) -> Optional[Dict[str, Any]]:
@@ -348,6 +342,88 @@ class PluginLoader:
             raise PluginLoadError(f"Module not found: {module_path}")
         except AttributeError:
             raise PluginLoadError(f"Class not found: {class_name} in {module_path}")
+
+    def scan_strategy_templates(self, strategy_name: str, force_reload: bool = False) -> Dict[str, Dict[str, Any]]:
+        """
+        扫描指定策略的模板文件
+        
+        Args:
+            strategy_name: 策略名称
+            force_reload: 是否强制重新加载
+            
+        Returns:
+            Dict[template_id, template_config]
+        """
+        if not force_reload and strategy_name in self._strategy_templates:
+            return self._strategy_templates[strategy_name].copy()
+        
+        templates = {}
+        strategy_dir = self.strategy_base_path / strategy_name / "plugins"
+        
+        if strategy_dir.exists():
+            # 扫描模板文件（除了strategy.json）
+            for template_file in strategy_dir.glob("*.json"):
+                if template_file.name == "strategy.json":
+                    continue
+                    
+                try:
+                    config = self._load_plugin_config(template_file)
+                    if not config:
+                        continue
+                    
+                    # 验证模板配置
+                    if "id" not in config or "name" not in config or "parameters" not in config:
+                        logger.log_warning(f"Invalid template format in {template_file}: missing required fields")
+                        continue
+                    
+                    template_id = config["id"]
+                    templates[template_id] = config
+                    logger.log_info(f"✅ Loaded strategy template: {strategy_name}/{template_id}")
+                    
+                except Exception as e:
+                    logger.log_error(f"Failed to load strategy template {template_file}: {e}")
+        
+        self._strategy_templates[strategy_name] = templates
+        return templates.copy()
+    
+    def get_strategy_templates(self, strategy_name: str) -> Dict[str, Dict[str, Any]]:
+        """
+        获取指定策略的所有模板
+        
+        Args:
+            strategy_name: 策略名称
+            
+        Returns:
+            Dict[template_id, template_config]
+        """
+        return self.scan_strategy_templates(strategy_name)
+    
+    def get_strategy_template(self, strategy_name: str, template_id: str) -> Optional[Dict[str, Any]]:
+        """
+        获取指定策略的特定模板
+        
+        Args:
+            strategy_name: 策略名称
+            template_id: 模板ID
+            
+        Returns:
+            模板配置或None
+        """
+        templates = self.get_strategy_templates(strategy_name)
+        return templates.get(template_id)
+    
+    def list_available_templates(self, strategy_name: str) -> List[str]:
+        """
+        列出指定策略的所有可用模板ID
+        
+        Args:
+            strategy_name: 策略名称
+            
+        Returns:
+            模板ID列表
+        """
+        templates = self.get_strategy_templates(strategy_name)
+        return list(templates.keys())
 
 # 全局插件加载器实例
 _plugin_loader = None

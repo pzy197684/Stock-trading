@@ -1,5 +1,5 @@
 {
-  "_comment": "CW1602 CoinW账号设置配置（非敏感信息�?,
+  "_comment": "CW1602 CoinW账号设置配置（非敏感信息）",
   "_description": "账号说明、风控偏好、告警开关等配置",
   
   "account_info": {
@@ -14,7 +14,7 @@
     "default_symbol": "ETHUSDT",
     "position_mode": "hedge",
     "margin_type": "isolated",
-    "leverage": 1,
+    "leverage": 5,
     "max_position_size": 1.0
   },
   

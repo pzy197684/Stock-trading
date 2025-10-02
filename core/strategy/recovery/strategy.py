@@ -38,7 +38,7 @@ class RecoveryState:
     trapped_qty: float = 0.0            # 被套持仓数量
     cap: float = 0.0                    # 容量上限
     at_full: bool = False               # 是否满仓
-    pending_tp: Dict[str, Any] = None   # 挂单记录
+    pending_tp: Optional[Dict[str, Any]] = None   # 挂单记录
     last_trade_id: int = 0              # 最后交易ID
     
     def __post_init__(self):
@@ -86,7 +86,7 @@ class RecoveryStrategy(StrategyBase):
     def get_default_params(self) -> Dict[str, Any]:
         """返回默认参数字典"""
         return {
-            'symbol': 'ETHUSDT',
+            'symbol': 'OPUSDT',
             'recovery': {
                 'mode': 'long_trapped',
                 'cap_ratio': 0.75,
@@ -428,7 +428,7 @@ class RecoveryStrategy(StrategyBase):
         else:
             position = context.position_short or {}
         
-        return float(position.get(PositionField.QUANTITY.value, 0))
+        return float(position.get(PositionField.QTY.value, 0))
     
     def _plan_to_signal(self, plan: RecoveryPlan, symbol: str) -> TradingSignal:
         """将执行计划转换为交易信号"""
@@ -473,13 +473,13 @@ class RecoveryStrategy(StrategyBase):
         """从上下文更新状态快照"""
         # 更新多头状态
         long_pos = context.position_long or {}
-        self.long_state.qty = float(long_pos.get(PositionField.QUANTITY.value, 0))
-        self.long_state.avg_price = float(long_pos.get(PositionField.AVERAGE_PRICE.value, 0))
+        self.long_state.qty = float(long_pos.get(PositionField.QTY.value, 0))
+        self.long_state.avg_price = float(long_pos.get(PositionField.AVG_PRICE.value, 0))
         
         # 更新空头状态  
         short_pos = context.position_short or {}
-        self.short_state.qty = float(short_pos.get(PositionField.QUANTITY.value, 0))
-        self.short_state.avg_price = float(short_pos.get(PositionField.AVERAGE_PRICE.value, 0))
+        self.short_state.qty = float(short_pos.get(PositionField.QTY.value, 0))
+        self.short_state.avg_price = float(short_pos.get(PositionField.AVG_PRICE.value, 0))
     
     def _load_state_from_storage(self, context: StrategyContext):
         """从存储加载状态"""

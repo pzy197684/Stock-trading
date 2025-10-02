@@ -97,88 +97,8 @@ export function AccountPanel() {
     }
   ];
 
-  const mockAccounts: Record<string, Account[]> = {
-    binance: [
-      {
-        id: "binance_1",
-        name: "币安主账户",
-        platform: "binance",
-        status: "connected",
-        balance: 12500.50,
-        apiKey: "ak_1234567890abcdef",
-        secretKey: "sk_abcdef1234567890",
-        template: "balanced",
-        parameters: {
-          maxPosition: 50,
-          riskLevel: 50,
-          stopLoss: 8,
-          takeProfit: 15,
-          autoTrade: true,
-          notifications: true
-        }
-      },
-      {
-        id: "binance_2",
-        name: "币安副账户",
-        platform: "binance",
-        status: "connected",
-        balance: 8200.75,
-        apiKey: "ak_fedcba0987654321",
-        secretKey: "sk_0987654321fedcba",
-        template: "conservative",
-        parameters: {
-          maxPosition: 30,
-          riskLevel: 20,
-          stopLoss: 5,
-          takeProfit: 10,
-          autoTrade: true,
-          notifications: true
-        }
-      }
-    ],
-    huobi: [
-      {
-        id: "huobi_1",
-        name: "火币账户A",
-        platform: "huobi",
-        status: "connected",
-        balance: 9800.25,
-        apiKey: "hb_1234567890abcdef",
-        secretKey: "hb_abcdef1234567890",
-        template: "aggressive",
-        parameters: {
-          maxPosition: 80,
-          riskLevel: 80,
-          stopLoss: 12,
-          takeProfit: 25,
-          autoTrade: true,
-          notifications: false
-        }
-      }
-    ],
-    okex: [
-      {
-        id: "okex_1",
-        name: "OKEx账户X",
-        platform: "okex",
-        status: "error",
-        balance: 0,
-        apiKey: "ok_1234567890abcdef",
-        secretKey: "ok_abcdef1234567890",
-        template: "balanced",
-        parameters: {
-          maxPosition: 50,
-          riskLevel: 50,
-          stopLoss: 8,
-          takeProfit: 15,
-          autoTrade: false,
-          notifications: true
-        }
-      }
-    ]
-  };
-
-  const [accounts, setAccounts] = useState(mockAccounts);
+  // 账户将从 API 获取，移除 Mock 数据
+  const [accounts, setAccounts] = useState<Record<string, Account[]>>({});
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
 
   const currentAccounts = accounts[selectedPlatform] || [];
@@ -323,7 +243,7 @@ export function AccountPanel() {
                           <div className="px-3">
                             <Slider
                               value={[selectedAccount.parameters.maxPosition]}
-                              onValueChange={(value) => updateParameter('maxPosition', value[0])}
+                              onValueChange={(value: number[]) => updateParameter('maxPosition', value[0])}
                               max={100}
                               step={5}
                               className="w-full"
@@ -341,7 +261,7 @@ export function AccountPanel() {
                           <div className="px-3">
                             <Slider
                               value={[selectedAccount.parameters.riskLevel]}
-                              onValueChange={(value) => updateParameter('riskLevel', value[0])}
+                              onValueChange={(value: number[]) => updateParameter('riskLevel', value[0])}
                               max={100}
                               step={10}
                               className="w-full"
@@ -389,7 +309,7 @@ export function AccountPanel() {
                           </div>
                           <Switch
                             checked={selectedAccount.parameters.autoTrade}
-                            onCheckedChange={(checked) => updateParameter('autoTrade', checked)}
+                            onCheckedChange={(checked: boolean) => updateParameter('autoTrade', checked)}
                           />
                         </div>
 
@@ -400,7 +320,7 @@ export function AccountPanel() {
                           </div>
                           <Switch
                             checked={selectedAccount.parameters.notifications}
-                            onCheckedChange={(checked) => updateParameter('notifications', checked)}
+                            onCheckedChange={(checked: boolean) => updateParameter('notifications', checked)}
                           />
                         </div>
                       </div>

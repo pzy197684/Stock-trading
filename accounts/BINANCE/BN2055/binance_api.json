@@ -2,6 +2,8 @@
   "_comment": "Binance期货API密钥配置 - BN2055账户", 
   "_warning": "请填入真实的API密钥，确保API密钥安全",
   
+  "owner": "潘正芳",
+  
   "API_KEY": "YOUR_BN2055_BINANCE_API_KEY_HERE",
   "API_SECRET": "YOUR_BN2055_BINANCE_API_SECRET_HERE",
   

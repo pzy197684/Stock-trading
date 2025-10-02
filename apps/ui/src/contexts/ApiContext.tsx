@@ -1,26 +1,47 @@
 // apps/ui/src/contexts/ApiContext.tsx
 // API数据上下文，提供全局数据管理
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { apiClient } from '../services/apiClient';
 
-const ApiContext = createContext(null);
+// 定义上下文类型
+interface ApiContextType {
+  dashboardSummary: any;
+  runningInstances: any[];
+  availablePlatforms: any[];
+  availableStrategies: any[];
+  recentLogs: any[];
+  isLoading: boolean;
+  error: string | null;
+  isConnected: boolean;
+  missingFeatures: any[];
+  fetchDashboardSummary: () => Promise<void>;
+  fetchRunningInstances: () => Promise<void>;
+  fetchAvailablePlatforms: () => Promise<void>;
+  fetchAvailableStrategies: () => Promise<void>;
+  fetchRecentLogs: (limit?: number, level?: string) => Promise<void>;
+  startStrategy: (accountId: string, strategyName: string, parameters: any) => Promise<any>;
+  stopStrategy: (accountId: string, instanceId: string) => Promise<any>;
+  executeCommand: (command: string) => Promise<any>;
+}
+
+const ApiContext = createContext<ApiContextType | null>(null);
 
 export function ApiProvider({ children }: { children: React.ReactNode }) {
   const [data, setData] = useState({
-    dashboardSummary: null,
-    runningInstances: [],
-    availablePlatforms: [],
-    availableStrategies: [],
-    recentLogs: [],
+    dashboardSummary: null as any,
+    runningInstances: [] as any[],
+    availablePlatforms: [] as any[],
+    availableStrategies: [] as any[],
+    recentLogs: [] as any[],
     isLoading: false,
-    error: null,
+    error: null as string | null,
     isConnected: false,
   });
 
-  const [missingFeatures, setMissingFeatures] = useState([]);
+  const [missingFeatures, setMissingFeatures] = useState<any[]>([]);
 
-  const recordMissingFeature = (component, feature, description) => {
+  const recordMissingFeature = (component: string, feature: string, description: string) => {
     const newFeature = {
       component,
       feature,
@@ -31,7 +52,7 @@ export function ApiProvider({ children }: { children: React.ReactNode }) {
     console.warn(`缺失功能记录: ${component}.${feature} - ${description}`);
   };
 
-  const updateData = (updates) => {
+  const updateData = (updates: Partial<typeof data>) => {
     setData(prev => ({ ...prev, ...updates }));
   };
 
@@ -49,7 +70,7 @@ export function ApiProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const fetchRunningInstances = async () => {
+  const fetchRunningInstances = useCallback(async () => {
     try {
       const result = await apiClient.getRunningInstances();
       updateData({ runningInstances: result.instances });
@@ -58,7 +79,7 @@ export function ApiProvider({ children }: { children: React.ReactNode }) {
       recordMissingFeature('CurrentRunning', 'instances', '运行实例数据获取失败');
       updateData({ error: '获取运行实例失败' });
     }
-  };
+  }, []);
 
   const fetchAvailablePlatforms = async () => {
     try {
@@ -82,7 +103,7 @@ export function ApiProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const fetchRecentLogs = async (limit = 100, level) => {
+  const fetchRecentLogs = async (limit = 100, level?: string) => {
     try {
       const result = await apiClient.getRecentLogs(limit, level);
       updateData({ recentLogs: result.logs });
@@ -93,7 +114,7 @@ export function ApiProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const startStrategy = async (accountId, strategyName, parameters) => {
+  const startStrategy = async (accountId: string, strategyName: string, parameters: any) => {
     try {
       const result = await apiClient.startStrategy(accountId, strategyName, parameters);
       if (result.success) {
@@ -110,7 +131,7 @@ export function ApiProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const stopStrategy = async (accountId, instanceId) => {
+  const stopStrategy = async (accountId: string, instanceId: string) => {
     try {
       const result = await apiClient.stopStrategy(accountId, instanceId);
       if (result.success) {
@@ -127,7 +148,7 @@ export function ApiProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const executeCommand = async (command) => {
+  const executeCommand = async (command: string) => {
     try {
       const result = await apiClient.executeCommand(command);
       return result.output;
@@ -146,7 +167,7 @@ export function ApiProvider({ children }: { children: React.ReactNode }) {
         fetchRunningInstances(),
         fetchAvailablePlatforms(),
         fetchAvailableStrategies(),
-        fetchRecentLogs(),
+        fetchRecentLogs(100),
       ]);
     } catch (error) {
       console.error('初始化数据失败:', error);
@@ -157,6 +178,8 @@ export function ApiProvider({ children }: { children: React.ReactNode }) {
 
   // WebSocket连接
   useEffect(() => {
+    // 暂时禁用WebSocket连接，因为后端不支持
+    /*
     const handleWebSocketMessage = (wsData) => {
       console.log('收到WebSocket消息:', wsData);
       
@@ -185,6 +208,7 @@ export function ApiProvider({ children }: { children: React.ReactNode }) {
     return () => {
       apiClient.disconnectWebSocket();
     };
+    */
   }, []);
 
   // 初始化数据和定期刷新
@@ -194,7 +218,7 @@ export function ApiProvider({ children }: { children: React.ReactNode }) {
     const interval = setInterval(() => {
       fetchDashboardSummary();
       fetchRunningInstances();
-    }, 30000); // 每30秒刷新一次
+    }, 10000); // 每10秒刷新一次，平衡性能和实时性
 
     return () => clearInterval(interval);
   }, []);

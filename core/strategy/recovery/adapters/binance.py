@@ -15,7 +15,7 @@ class RecoveryBinanceAdapter:
     def __init__(self, platform: BinancePlatform, config: Dict[str, Any]):
         self.platform = platform
         self.config = config
-        self.symbol = config.get('symbol', 'ETHUSDT')
+        self.symbol = config.get('symbol', 'OPUSDT')
         
         # 缓存相关
         self.price_cache = {}
@@ -34,9 +34,9 @@ class RecoveryBinanceAdapter:
                     return cached_price
             
             # 获取最新价格
-            ticker = self.platform.get_ticker(self.symbol)
-            if ticker and 'price' in ticker:
-                price = float(ticker['price'])
+            price_result = self.platform.get_market_price(self.symbol)
+            if price_result and not price_result.get('error') and 'price' in price_result:
+                price = float(price_result['price'])
                 self.price_cache[cache_key] = (price, now)
                 return price
             

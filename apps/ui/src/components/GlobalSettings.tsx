@@ -34,6 +34,7 @@ interface GlobalSettings {
     enableEncryption: boolean;
     logLevel: string;
     autoLogout: boolean;
+    autoTradeMode: boolean;
   };
   performance: {
     maxConcurrentConnections: number;
@@ -72,7 +73,8 @@ export function GlobalSettings() {
       sessionTimeout: 30,
       enableEncryption: true,
       logLevel: 'info',
-      autoLogout: true
+      autoLogout: true,
+      autoTradeMode: false
     },
     performance: {
       maxConcurrentConnections: 50,
@@ -398,6 +400,17 @@ export function GlobalSettings() {
               <Switch
                 checked={settings.security.autoLogout}
                 onCheckedChange={(checked) => updateSetting('security', 'autoLogout', checked)}
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <Label>自动交易模式</Label>
+                <p className="text-sm text-muted-foreground">启用后允许系统自动执行交易</p>
+              </div>
+              <Switch
+                checked={settings.security.autoTradeMode}
+                onCheckedChange={(checked) => updateSetting('security', 'autoTradeMode', checked)}
               />
             </div>
           </div>

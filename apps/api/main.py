@@ -9,6 +9,8 @@ import sys
 import os
 import asyncio
 import json
+import traceback
+from functools import wraps
 from datetime import datetime
 from pathlib import Path
 
@@ -21,8 +23,55 @@ from core.managers.strategy_manager import get_strategy_manager
 from core.state_store import get_state_manager
 from core.utils.plugin_loader import get_plugin_loader
 from core.logger import logger
+from core.websocket_logger import setup_websocket_logging
 from core.domain.enums import Platform, OrderStatus, PositionSide
 from core.domain.models import AccountState, PositionState
+
+# 错误处理装饰器
+def handle_api_errors(func):
+    """统一的API错误处理装饰器"""
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        try:
+            # 记录API调用开始
+            func_name = func.__name__
+            logger.debug(f"API调用开始: {func_name}")
+            
+            result = await func(*args, **kwargs)
+            
+            # 记录API调用成功
+            logger.debug(f"API调用成功: {func_name}")
+            return result
+            
+        except HTTPException as e:
+            # HTTP异常直接抛出
+            logger.warning(f"HTTP异常 [{func_name}]: {e.status_code} - {e.detail}")
+            raise e
+            
+        except Exception as e:
+            # 记录详细错误信息
+            error_msg = f"API错误 [{func_name}]: {str(e)}"
+            logger.exception(error_msg)
+            
+            # 广播错误日志
+            await manager.broadcast_log({
+                "timestamp": datetime.now().isoformat(),
+                "level": "error",
+                "message": error_msg,
+                "source": "API",
+                "category": "api_error",
+                "data": {
+                    "function": func_name,
+                    "error_type": type(e).__name__,
+                    "traceback": traceback.format_exc()
+                }
+            })
+            
+            raise HTTPException(
+                status_code=500,
+                detail=f"Internal server error in {func_name}: {str(e)}"
+            )
+    return wrapper
 
 app = FastAPI(
     title="Stock Trading API",
@@ -33,16 +82,7 @@ app = FastAPI(
 # 添加CORS支持
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 在生产环境中应该设置为具体的域名
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# CORS设置
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://localhost:3002", "http://localhost:3003", "http://localhost:5173"],  # React开发服务器端口
+    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://localhost:3002", "http://localhost:3003", "http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -54,26 +94,92 @@ strategy_manager = get_strategy_manager()
 state_manager = get_state_manager()
 plugin_loader = get_plugin_loader()
 
+# 导入策略执行引擎
+from core.execute.strategy_engine import get_strategy_engine
+strategy_engine = get_strategy_engine()
+
 # 存储WebSocket连接
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
+        self.log_connections: List[WebSocket] = []  # 专门用于日志推送
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
 
+    async def connect_log(self, websocket: WebSocket):
+        """连接日志WebSocket"""
+        await websocket.accept()
+        self.log_connections.append(websocket)
+        logger.info(f"日志WebSocket客户端已连接，当前总数: {len(self.log_connections)}")
+
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        if websocket in self.log_connections:
+            self.log_connections.remove(websocket)
+            logger.info(f"日志WebSocket客户端已断开，当前总数: {len(self.log_connections)}")
 
     async def broadcast(self, message: dict):
         for connection in self.active_connections:
             try:
                 await connection.send_text(json.dumps(message))
-            except:
+            except Exception as e:
+                logger.error(f"WebSocket广播消息失败: {e}")
                 pass
 
+    async def broadcast_log(self, log_entry: dict):
+        """广播日志消息"""
+        if not self.log_connections:
+            return
+            
+        message = {
+            "type": "log",
+            "data": log_entry
+        }
+        
+        disconnected = []
+        for connection in self.log_connections:
+            try:
+                await connection.send_text(json.dumps(message))
+            except Exception as e:
+                logger.error(f"发送日志消息失败: {e}")
+                disconnected.append(connection)
+        
+        # 清理断开的连接
+        for conn in disconnected:
+            self.log_connections.remove(conn)
+
 manager = ConnectionManager()
+
+# 设置WebSocket日志推送
+setup_websocket_logging(logger, manager.broadcast_log)
+
+# 应用生命周期事件
+@app.on_event("startup")
+async def startup_event():
+    """应用启动事件"""
+    logger.log_info("🚀 API服务器启动中...")
+    
+    # 启动策略执行引擎
+    try:
+        await strategy_engine.start()
+        logger.log_info("✅ 策略执行引擎启动成功")
+    except Exception as e:
+        logger.log_error(f"❌ 策略执行引擎启动失败: {e}")
+
+@app.on_event("shutdown") 
+async def shutdown_event():
+    """应用关闭事件"""
+    logger.log_info("⏹️ API服务器关闭中...")
+    
+    # 停止策略执行引擎
+    try:
+        await strategy_engine.stop()
+        logger.log_info("✅ 策略执行引擎已停止")
+    except Exception as e:
+        logger.log_error(f"❌ 策略执行引擎停止失败: {e}")
 
 # Pydantic模型定义
 class CreateInstanceRequest(BaseModel):
@@ -82,6 +188,14 @@ class CreateInstanceRequest(BaseModel):
     strategy: str
     symbol: str
     parameters: Optional[Dict[str, Any]] = None
+
+class StopStrategyRequest(BaseModel):
+    account_id: str
+    instance_id: str
+
+class ForceStopStrategyRequest(BaseModel):
+    account_id: str
+    instance_id: str
 
 # 缺失功能记录
 MISSING_FEATURES = []
@@ -94,6 +208,71 @@ def add_missing_feature(feature: str, description: str):
         "timestamp": datetime.now().isoformat()
     })
     logger.log_info(f"记录缺失功能: {feature} - {description}")
+
+def get_account_owner(account_name: str) -> str:
+    """获取账号拥有人信息 - 优先从API配置文件读取"""
+    try:
+        # 方法1：优先从API配置文件读取拥有人信息
+        accounts_dir = os.path.join(project_root, "accounts")
+        
+        # 查找账号的API配置文件
+        for platform_dir in os.listdir(accounts_dir):
+            if platform_dir.startswith('_'):
+                continue
+            platform_path = os.path.join(accounts_dir, platform_dir)
+            if os.path.isdir(platform_path):
+                account_path = os.path.join(platform_path, account_name)
+                if os.path.isdir(account_path):
+                    # 查找API配置文件（支持多种命名格式）
+                    api_files = [
+                        f"{platform_dir.lower()}_api.json",  # 如 binance_api.json
+                        "api.json",
+                        "config.json"
+                    ]
+                    
+                    for api_file in api_files:
+                        api_file_path = os.path.join(account_path, api_file)
+                        if os.path.exists(api_file_path):
+                            with open(api_file_path, 'r', encoding='utf-8-sig') as f:
+                                api_config = json.load(f)
+                                owner = api_config.get('owner')
+                                if owner:
+                                    logger.log_info(f"Found owner '{owner}' for account {account_name} in {api_file}")
+                                    return owner
+        
+        # 方法2：从profile.json读取拥有人信息（向后兼容）
+        profiles_dir = os.path.join(project_root, "profiles")
+        
+        for platform_dir in os.listdir(profiles_dir):
+            if platform_dir.startswith('_'):
+                continue
+            platform_path = os.path.join(profiles_dir, platform_dir)
+            if os.path.isdir(platform_path):
+                account_path = os.path.join(platform_path, account_name)
+                if os.path.isdir(account_path):
+                    profile_file = os.path.join(account_path, 'profile.json')
+                    if os.path.exists(profile_file):
+                        with open(profile_file, 'r', encoding='utf-8-sig') as f:
+                            profile = json.load(f)
+                            owner = profile.get('profile_info', {}).get('owner')
+                            if owner:
+                                logger.log_info(f"Found owner '{owner}' for account {account_name} in profile.json (fallback)")
+                                return owner
+        
+        # 方法3：使用默认规则（最后的后备方案）
+        if account_name == 'BN2055':
+            logger.log_info(f"Using default rule: {account_name} -> 潘正芳")
+            return '潘正芳'
+        else:
+            logger.log_info(f"Using default rule: {account_name} -> 潘正友")
+            return '潘正友'
+    except Exception as e:
+        logger.log_error(f"获取账号 {account_name} 拥有人信息失败: {e}")
+        # 默认规则：BN2055属于潘正芳，其他账号属于潘正友
+        if account_name == 'BN2055':
+            return '潘正芳'
+        else:
+            return '潘正友'
 
 @app.get("/")
 async def root():
@@ -265,7 +444,7 @@ async def get_running_instances():
                 # 获取策略参数
                 parameters = getattr(strategy_instance, 'parameters', {})
                 # 从参数中提取交易对信息
-                symbol = parameters.get('symbol', 'BTC/USDT')
+                symbol = parameters.get('symbol', 'OP/USDT')
                 # 如果symbol不包含/，转换为标准格式
                 if symbol and 'USDT' in symbol and '/' not in symbol:
                     symbol = symbol.replace('USDT', '/USDT')
@@ -283,7 +462,8 @@ async def get_running_instances():
                     "runtime": getattr(strategy_instance, 'runtime_seconds', 0),
                     "last_signal": getattr(strategy_instance, 'last_signal_time', None),
                     "symbol": symbol,  # 添加交易对信息
-                    "parameters": parameters
+                    "parameters": parameters,
+                    "owner": get_account_owner(getattr(strategy_instance, 'account', 'unknown'))  # 添加拥有人信息
                 })
             except Exception as e:
                 logger.log_error(f"Error processing strategy instance: {e}")
@@ -295,6 +475,372 @@ async def get_running_instances():
         logger.log_error(f"获取运行实例失败: {e}")
         add_missing_feature("running_instances", "运行策略实例状态获取功能需要完善")
         return {"instances": []}
+
+@app.get("/api/running/instances/{instance_name}/parameters")
+async def get_instance_parameters(instance_name: str):
+    """获取指定运行实例的参数"""
+    try:
+        # 获取活跃策略
+        active_strategies = strategy_manager.get_active_strategies()
+        
+        # 查找匹配的策略实例
+        target_instance = None
+        for strategy_instance in active_strategies:
+            if getattr(strategy_instance, 'instance_id', '') == instance_name or \
+               getattr(strategy_instance, 'account', '') == instance_name:
+                target_instance = strategy_instance
+                break
+        
+        if not target_instance:
+            logger.log_warning(f"Instance not found: {instance_name}")
+            return {"success": False, "error": "Instance not found"}
+        
+        # 获取原始参数
+        raw_parameters = getattr(target_instance, 'parameters', {})
+        
+        logger.log_info(f"Retrieved parameters for instance {instance_name}")
+        return {
+            "success": True,
+            "instance_id": getattr(target_instance, 'instance_id', instance_name),
+            "account": getattr(target_instance, 'account', 'unknown'),
+            "platform": getattr(target_instance, 'platform', 'unknown'),
+            "strategy": getattr(target_instance, 'strategy_name', 'unknown'),
+            "raw_parameters": raw_parameters
+        }
+        
+    except Exception as e:
+        logger.log_error(f"获取实例参数失败: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.post("/api/running/instances/{instance_name}/parameters")
+async def update_instance_parameters(instance_name: str, parameters: dict):
+    """更新指定运行实例的参数"""
+    try:
+        logger.log_info(f"收到参数更新请求 - 实例: {instance_name}")
+        logger.log_info(f"收到的参数: {json.dumps(parameters, indent=2, ensure_ascii=False)}")
+        
+        # 获取活跃策略
+        active_strategies = strategy_manager.get_active_strategies()
+        logger.log_info(f"当前活跃策略数量: {len(active_strategies)}")
+        
+        # 查找匹配的策略实例
+        target_instance = None
+        for strategy_instance in active_strategies:
+            instance_id = getattr(strategy_instance, 'instance_id', '')
+            account = getattr(strategy_instance, 'account', '')
+            logger.log_info(f"检查策略实例 - instance_id: {instance_id}, account: {account}")
+            
+            if instance_id == instance_name or account == instance_name:
+                target_instance = strategy_instance
+                logger.log_info(f"找到匹配的实例: {instance_name}")
+                break
+        
+        if not target_instance:
+            logger.log_warning(f"Instance not found: {instance_name}, 直接更新配置文件")
+            # 如果找不到运行实例，直接更新配置文件
+            # 假设实例名就是账户名，如 BN1602
+            account = instance_name
+            platform = "BINANCE"  # 可以根据account前缀判断
+            strategy_name = "martingale_hedge"
+        else:
+            # 更新参数 - 这里应该调用策略实例的更新方法
+            # 暂时只是记录，因为具体的更新逻辑依赖于策略实现
+            if hasattr(target_instance, 'update_parameters'):
+                target_instance.update_parameters(parameters)
+            else:
+                # 如果没有更新方法，直接设置参数属性
+                setattr(target_instance, 'parameters', parameters)
+            
+            account = getattr(target_instance, 'account', instance_name)
+            platform = getattr(target_instance, 'platform', 'BINANCE')
+            strategy_name = getattr(target_instance, 'strategy_name', 'martingale_hedge')
+        # 保存参数到配置文件
+        try:
+            # 构建配置文件路径
+            if platform.upper() == 'BINANCE':
+                config_path = f"profiles/BINANCE/{account}/strategies/{strategy_name}.json"
+            elif platform.upper() == 'COINW':
+                config_path = f"profiles/COINW/{account}/strategies/{strategy_name}.json"
+            elif platform.upper() == 'OKX':
+                config_path = f"profiles/OKX/{account}/strategies/{strategy_name}.json"
+            else:
+                config_path = f"profiles/{platform.upper()}/{account}/strategies/{strategy_name}.json"
+            
+            logger.log_info(f"保存配置到文件: {config_path}")
+            
+            # 确保目录存在
+            os.makedirs(os.path.dirname(config_path), exist_ok=True)
+            
+            # 读取现有配置文件，如果存在的话
+            existing_config = {}
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path, 'r', encoding='utf-8-sig') as f:
+                        existing_config = json.load(f)
+                except Exception as e:
+                    logger.log_warning(f"Failed to read existing config: {e}")
+            
+            # 深度合并参数，保留原有参数的其他字段
+            def deep_merge(target, source):
+                """深度合并字典，保留target中source没有的键"""
+                for key, value in source.items():
+                    if key in target and isinstance(target[key], dict) and isinstance(value, dict):
+                        deep_merge(target[key], value)
+                    else:
+                        target[key] = value
+                return target
+            
+            logger.log_info(f"合并前的现有配置: {json.dumps(existing_config, indent=2, ensure_ascii=False)}")
+            
+            # 更新配置中的参数部分，使用深度合并保留其他配置
+            deep_merge(existing_config, parameters)
+            
+            logger.log_info(f"合并后的最终配置: {json.dumps(existing_config, indent=2, ensure_ascii=False)}")
+            
+            # 保存更新后的配置文件
+            with open(config_path, 'w', encoding='utf-8-sig') as f:
+                json.dump(existing_config, f, indent=2, ensure_ascii=False)
+            
+            logger.log_info(f"Parameters saved to config file: {config_path}")
+            
+        except Exception as save_error:
+            logger.log_warning(f"Failed to save parameters to config file: {save_error}")
+        
+        logger.log_info(f"Updated parameters for instance {instance_name}")
+        return {
+            "success": True,
+            "message": f"Parameters updated for instance {instance_name}"
+        }
+        
+    except Exception as e:
+        logger.log_error(f"更新实例参数失败: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.post("/api/config/profiles/{platform}/{account}/{strategy}")
+async def update_profile_config(platform: str, account: str, strategy: str, parameters: dict):
+    """直接更新配置文件，不依赖运行实例"""
+    try:
+        logger.log_info(f"直接更新配置文件 - 平台: {platform}, 账户: {account}, 策略: {strategy}")
+        logger.log_info(f"更新参数: {json.dumps(parameters, indent=2, ensure_ascii=False)}")
+        
+        # 构建配置文件路径
+        config_path = f"profiles/{platform.upper()}/{account}/strategies/{strategy}.json"
+        logger.log_info(f"配置文件路径: {config_path}")
+        
+        # 确保目录存在
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        
+        # 读取现有配置文件
+        existing_config = {}
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, 'r', encoding='utf-8-sig') as f:
+                    existing_config = json.load(f)
+                logger.log_info(f"读取到现有配置，共{len(existing_config)}个字段")
+            except Exception as e:
+                logger.log_warning(f"读取现有配置失败: {e}")
+        else:
+            logger.log_info("配置文件不存在，将创建新文件")
+        
+        # 深度合并参数
+        def deep_merge(target, source):
+            """深度合并字典，保留target中source没有的键"""
+            for key, value in source.items():
+                if key in target and isinstance(target[key], dict) and isinstance(value, dict):
+                    deep_merge(target[key], value)
+                else:
+                    target[key] = value
+            return target
+        
+        logger.log_info(f"合并前配置: {json.dumps(existing_config, indent=2, ensure_ascii=False)}")
+        
+        # 合并参数
+        deep_merge(existing_config, parameters)
+        
+        logger.log_info(f"合并后配置: {json.dumps(existing_config, indent=2, ensure_ascii=False)}")
+        
+        # 保存配置文件
+        with open(config_path, 'w', encoding='utf-8-sig') as f:
+            json.dump(existing_config, f, indent=2, ensure_ascii=False)
+        
+        logger.log_info(f"配置文件已成功保存: {config_path}")
+        
+        return {
+            "success": True,
+            "message": f"配置文件已更新: {config_path}",
+            "config_path": config_path
+        }
+        
+    except Exception as e:
+        logger.log_error(f"更新配置文件失败: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.post("/api/config/update")
+async def update_config_parameters(request_data: dict):
+    """
+    通用配置更新API - 支持多种更新模式
+    
+    请求格式:
+    {
+        "config_id": "BINANCE_BN1602_martingale_hedge",  // 可选：使用配置ID
+        "platform": "BINANCE",                           // 或单独指定
+        "account": "BN1602", 
+        "strategy": "martingale_hedge",
+        "parameters": { ... }                           // 要更新的参数
+    }
+    """
+    try:
+        # 支持两种方式：config_id 或 分别指定 platform/account/strategy
+        if "config_id" in request_data:
+            # 从配置ID解析信息 (格式: PLATFORM_ACCOUNT_STRATEGY)
+            config_id = request_data["config_id"]
+            parts = config_id.split("_")
+            if len(parts) >= 3:
+                platform = parts[0]
+                account = parts[1] 
+                strategy = "_".join(parts[2:])  # 策略名可能包含下划线
+            else:
+                raise ValueError(f"Invalid config_id format: {config_id}")
+        else:
+            # 直接从请求中获取
+            platform = request_data.get("platform")
+            account = request_data.get("account") 
+            strategy = request_data.get("strategy")
+            
+        if not all([platform, account, strategy]):
+            raise ValueError("Missing required fields: platform, account, strategy")
+            
+        parameters = request_data.get("parameters", {})
+        if not parameters:
+            raise ValueError("No parameters to update")
+        
+        # 构建配置文件路径
+        config_path = f"profiles/{platform.upper()}/{account}/strategies/{strategy}.json"
+        
+        # 确保目录存在
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        
+        # 读取现有配置文件
+        existing_config = {}
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, 'r', encoding='utf-8-sig') as f:
+                    existing_config = json.load(f)
+            except Exception as e:
+                logger.log_warning(f"Failed to read existing config: {e}")
+        
+        # 使用深度合并更新配置
+        def deep_merge(target, source):
+            """深度合并两个字典"""
+            for key, value in source.items():
+                if key in target and isinstance(target[key], dict) and isinstance(value, dict):
+                    deep_merge(target[key], value)
+                else:
+                    target[key] = value
+        
+        deep_merge(existing_config, parameters)
+        
+        # 保存更新后的配置文件
+        with open(config_path, 'w', encoding='utf-8-sig') as f:
+            json.dump(existing_config, f, indent=2, ensure_ascii=False)
+        
+        logger.log_info(f"Configuration updated: {config_path}")
+        
+        return {
+            "success": True,
+            "message": f"Configuration updated for {platform}/{account}/{strategy}",
+            "config_path": config_path
+        }
+        
+    except Exception as e:
+        logger.log_error(f"更新配置文件失败: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.get("/api/config/list")
+async def list_configurations():
+    """获取所有可用的配置文件列表"""
+    try:
+        configs = []
+        profiles_dir = "profiles"
+        
+        if not os.path.exists(profiles_dir):
+            return {"success": True, "configs": []}
+            
+        # 遍历所有平台
+        for platform in os.listdir(profiles_dir):
+            platform_dir = os.path.join(profiles_dir, platform)
+            if not os.path.isdir(platform_dir):
+                continue
+                
+            # 遍历所有账号
+            for account in os.listdir(platform_dir):
+                account_dir = os.path.join(platform_dir, account)
+                strategies_dir = os.path.join(account_dir, "strategies")
+                
+                if not os.path.isdir(strategies_dir):
+                    continue
+                    
+                # 遍历所有策略文件
+                for strategy_file in os.listdir(strategies_dir):
+                    if strategy_file.endswith('.json'):
+                        strategy_name = strategy_file[:-5]  # 移除.json后缀
+                        config_id = f"{platform}_{account}_{strategy_name}"
+                        config_path = os.path.join(strategies_dir, strategy_file)
+                        
+                        configs.append({
+                            "config_id": config_id,
+                            "platform": platform,
+                            "account": account,
+                            "strategy": strategy_name,
+                            "config_path": config_path,
+                            "exists": os.path.exists(config_path)
+                        })
+        
+        return {
+            "success": True,
+            "configs": configs,
+            "total": len(configs)
+        }
+        
+    except Exception as e:
+        logger.log_error(f"获取配置列表失败: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.get("/api/config/get")
+async def get_configuration(config_id: str = None, platform: str = None, account: str = None, strategy: str = None):
+    """获取指定配置文件内容"""
+    try:
+        # 支持两种方式获取配置
+        if config_id:
+            parts = config_id.split("_")
+            if len(parts) >= 3:
+                platform = parts[0]
+                account = parts[1]
+                strategy = "_".join(parts[2:])
+            else:
+                raise ValueError(f"Invalid config_id format: {config_id}")
+        
+        if not all([platform, account, strategy]):
+            raise ValueError("Missing required parameters")
+            
+        config_path = f"profiles/{platform.upper()}/{account}/strategies/{strategy}.json"
+        
+        if not os.path.exists(config_path):
+            return {"success": False, "error": "Configuration file not found"}
+            
+        with open(config_path, 'r', encoding='utf-8-sig') as f:
+            config_data = json.load(f)
+            
+        return {
+            "success": True,
+            "config": config_data,
+            "config_id": f"{platform}_{account}_{strategy}",
+            "config_path": config_path
+        }
+        
+    except Exception as e:
+        logger.log_error(f"获取配置失败: {e}")
+        return {"success": False, "error": str(e)}
 
 @app.get("/api/platforms/available")
 async def get_available_platforms():
@@ -828,6 +1374,39 @@ async def create_instance(request: CreateInstanceRequest):
         if request.strategy not in available_strategies:
             raise HTTPException(status_code=400, detail=f"策略不存在: {request.strategy}")
         
+        # 检查是否已存在相同的实例（同策略、同平台、同账号、同币种）
+        try:
+            active_strategies = strategy_manager.get_active_strategies()
+            for strategy_instance in active_strategies:
+                if (hasattr(strategy_instance, 'account') and 
+                    hasattr(strategy_instance, 'platform') and 
+                    hasattr(strategy_instance, 'strategy_name') and
+                    hasattr(strategy_instance, 'parameters')):
+                    
+                    instance_account = getattr(strategy_instance, 'account', '')
+                    instance_platform = getattr(strategy_instance, 'platform', '')
+                    instance_strategy = getattr(strategy_instance, 'strategy_name', '')
+                    instance_symbol = getattr(strategy_instance, 'parameters', {}).get('symbol', '')
+                    
+                    # 标准化交易对格式进行比较
+                    request_symbol_normalized = request.symbol.replace('/', '').upper()
+                    instance_symbol_normalized = instance_symbol.replace('/', '').upper()
+                    
+                    if (instance_account == request.account_id and 
+                        instance_platform.upper() == request.platform.upper() and
+                        instance_strategy == request.strategy and
+                        instance_symbol_normalized == request_symbol_normalized):
+                        
+                        raise HTTPException(
+                            status_code=400, 
+                            detail=f"实例已存在：{request.platform}/{request.account_id}/{request.strategy} 交易对 {request.symbol} 的实例正在运行中，不允许重复创建"
+                        )
+        except HTTPException:
+            raise  # 重新抛出HTTPException
+        except Exception as e:
+            logger.log_warning(f"检查重复实例时出错: {e}")
+            # 继续执行，不因检查失败而阻止创建
+        
         # 创建策略实例
         final_params = request.parameters or {}
         if request.symbol:
@@ -844,7 +1423,8 @@ async def create_instance(request: CreateInstanceRequest):
         if strategy_instance:
             strategy_instance.platform = request.platform
             strategy_instance.strategy_name = request.strategy
-            strategy_instance.parameters = final_params
+            # 不要覆盖parameters，因为策略管理器已经加载了完整的配置文件参数
+            # strategy_instance.parameters = final_params  # 删除这行，保留从配置文件加载的参数
         
         # 自动启动策略实例
         start_success = strategy_manager.start_strategy(request.account_id, instance_id)
@@ -917,28 +1497,65 @@ async def start_strategy(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/strategy/stop")
-async def stop_strategy(account_id: str, instance_id: str):
-    """停止策略 - 使用instance_id而不是strategy_name"""
+async def stop_strategy(request: StopStrategyRequest):
+    """停止策略 - 使用request body"""
     try:
-        success = strategy_manager.stop_strategy(account_id, instance_id)
+        success = strategy_manager.stop_strategy(request.account_id, request.instance_id)
         
         if success:
             # 广播更新
             await manager.broadcast({
                 "type": "strategy_stopped",
-                "account_id": account_id,
-                "instance_id": instance_id,
+                "account_id": request.account_id,
+                "instance_id": request.instance_id,
                 "timestamp": datetime.now().isoformat()
             })
             return {
                 "success": True, 
-                "message": f"策略实例 {instance_id} 在账号 {account_id} 上停止成功"
+                "message": f"策略实例 {request.instance_id} 在账号 {request.account_id} 上停止成功"
             }
         else:
             return {"success": False, "message": "策略停止失败"}
     except Exception as e:
         logger.log_error(f"停止策略失败: {e}")
         add_missing_feature("strategy_stop", "策略停止功能需要完善")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/strategy/force-stop-and-close")
+async def force_stop_and_close_strategy(request: ForceStopStrategyRequest):
+    """紧急平仓并停止策略"""
+    try:
+        # 执行紧急平仓
+        close_result = strategy_manager.force_close_all_positions(request.account_id, request.instance_id)
+        
+        # 停止策略
+        stop_success = strategy_manager.stop_strategy(request.account_id, request.instance_id)
+        
+        if close_result["success"] and stop_success:
+            # 广播更新
+            await manager.broadcast({
+                "type": "strategy_force_stopped",
+                "account_id": request.account_id,
+                "instance_id": request.instance_id,
+                "timestamp": datetime.now().isoformat(),
+                "details": close_result
+            })
+            
+            return {
+                "success": True,
+                "message": f"策略实例 {request.instance_id} 紧急平仓并停止成功",
+                "details": close_result
+            }
+        else:
+            error_msg = f"紧急平仓失败: {close_result.get('errors', [])} | 停止策略: {'成功' if stop_success else '失败'}"
+            return {
+                "success": False, 
+                "message": error_msg,
+                "details": close_result
+            }
+    except Exception as e:
+        logger.log_error(f"紧急平仓并停止策略失败: {e}")
+        add_missing_feature("strategy_force_stop", "紧急平仓功能需要完善")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/logs/recent")
@@ -1036,6 +1653,69 @@ async def get_recent_logs(
         logger.log_error(f"获取日志失败: {e}")
         return {"logs": [], "count": 0}
 
+@app.websocket("/ws/logs")
+async def websocket_logs(websocket: WebSocket):
+    """日志WebSocket端点"""
+    await manager.connect_log(websocket)
+    try:
+        # 发送连接成功消息
+        await websocket.send_text(json.dumps({
+            "type": "connection",
+            "status": "connected",
+            "message": "日志WebSocket连接成功",
+            "timestamp": datetime.now().isoformat()
+        }))
+        
+        # 发送历史日志(最近100条)
+        try:
+            log_file = project_root / "logs" / "runtime.log"
+            if log_file.exists():
+                with open(log_file, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                    recent_logs = lines[-100:] if len(lines) > 100 else lines
+                    
+                for line in recent_logs:
+                    if line.strip():
+                        await websocket.send_text(json.dumps({
+                            "type": "log",
+                            "data": {
+                                "timestamp": datetime.now().isoformat(),
+                                "level": "info",
+                                "message": line.strip(),
+                                "source": "history",
+                                "category": "system"
+                            }
+                        }))
+        except Exception as e:
+            logger.error(f"发送历史日志失败: {e}")
+        
+        # 保持连接活跃
+        while True:
+            try:
+                # 等待客户端消息(心跳包)
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                message = json.loads(data)
+                
+                if message.get("type") == "ping":
+                    await websocket.send_text(json.dumps({
+                        "type": "pong",
+                        "timestamp": datetime.now().isoformat()
+                    }))
+                    
+            except asyncio.TimeoutError:
+                # 发送心跳包
+                await websocket.send_text(json.dumps({
+                    "type": "heartbeat",
+                    "timestamp": datetime.now().isoformat()
+                }))
+                
+    except WebSocketDisconnect:
+        logger.info("日志WebSocket客户端主动断开")
+    except Exception as e:
+        logger.error(f"日志WebSocket错误: {e}")
+    finally:
+        manager.disconnect(websocket)
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket连接，用于实时数据推送"""
@@ -1059,6 +1739,16 @@ async def websocket_endpoint(websocket: WebSocket):
             
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+@app.post("/api/logs/test")
+async def test_logs():
+    """测试日志功能"""
+    logger.info("这是一条测试信息日志")
+    logger.warning("这是一条测试警告日志")
+    logger.error("这是一条测试错误日志")
+    logger.trade("测试交易日志: BTCUSDT 买入订单已提交")
+    
+    return {"message": "测试日志已生成", "status": "success"}
 
 if __name__ == "__main__":
     import uvicorn

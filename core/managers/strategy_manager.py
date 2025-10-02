@@ -18,6 +18,20 @@ class StrategyInstance:
         self.last_executed_at = None
         self.execution_interval = 1.0  # 执行间隔（秒）
         
+        # 添加API需要的属性
+        self.strategy_name = getattr(strategy, 'name', 'unknown')
+        self.platform = 'unknown'  # 将在create_strategy_instance中设置
+        self.status = getattr(strategy, 'status', 'unknown')
+        self.total_profit = 0.0
+        self.profit_rate = 0.0
+        self.positions = []
+        self.orders = []
+        self.runtime_seconds = 0
+        self.last_signal_time = None
+        self.parameters = {}
+        # 添加运行时数据存储
+        self.runtime_data = {}
+        
     def should_execute(self) -> bool:
         """判断是否应该执行策略"""
         if self.strategy.status != StrategyStatus.RUNNING:
@@ -33,19 +47,40 @@ class StrategyInstance:
         try:
             if not self.should_execute():
                 return None
-            
+
             signal = self.strategy.generate_signal(context)
             self.last_executed_at = time.time()
             self.strategy.execution_count += 1
             self.strategy.last_execution_time = self.last_executed_at
             self.strategy.last_signal = signal
             
+            # 更新运行时统计
+            self.runtime_seconds = int(time.time() - self.created_at)
+            if signal:
+                self.last_signal_time = self.last_executed_at
+            
+            # 更新状态
+            self.status = getattr(self.strategy, 'status', 'unknown')
+
             return signal
             
         except Exception as e:
             logger.log_error(f"❌ Strategy execution failed {self.account}/{self.instance_id}: {e}")
             self.strategy.on_error(e, context)
             return None
+    
+    def get_runtime_seconds(self) -> int:
+        """计算实际运行时长（秒）"""
+        if self.strategy.status == StrategyStatus.RUNNING and hasattr(self.strategy, '_start_time'):
+            return int(time.time() - self.strategy._start_time)
+        elif self.strategy.status == StrategyStatus.RUNNING:
+            # 如果没有start_time，使用创建时间作为起始时间
+            if not hasattr(self.strategy, '_start_time'):
+                self.strategy._start_time = time.time()
+            return int(time.time() - self.strategy._start_time)
+        return 0
+    
+
     
     def get_info(self) -> Dict[str, Any]:
         """获取策略实例信息"""
@@ -60,7 +95,8 @@ class StrategyInstance:
             "execution_count": self.strategy.execution_count,
             "error_count": self.strategy.error_count,
             "last_error": self.strategy.last_error,
-            "params": self.strategy.params.copy()
+            "params": self.strategy.params.copy(),
+            "runtime_seconds": self.get_runtime_seconds()
         }
 
 class StrategyManager:
@@ -111,6 +147,131 @@ class StrategyManager:
         """获取所有可用策略列表"""
         return self.plugin_loader.list_available_strategies()
     
+    def _validate_strategy_params(self, params: Dict[str, Any], strategy_name: str):
+        """验证策略参数的完整性"""
+        logger.log_info(f"🔍 Validating strategy params for {strategy_name}")
+        logger.log_info(f"📋 Parameters received: {params}")
+        
+        # 针对马丁对冲策略的关键参数验证
+        if strategy_name == "martingale_hedge":
+            required_params = [
+                "symbol",
+                "long.first_qty", "long.add_ratio", "long.add_interval", "long.max_add_times",
+                "long.tp_first_order", "long.tp_before_full", "long.tp_after_full",
+                "short.first_qty", "short.add_ratio", "short.add_interval", "short.max_add_times", 
+                "short.tp_first_order", "short.tp_before_full", "short.tp_after_full",
+                "hedge.trigger_loss", "hedge.equal_eps", "hedge.min_wait_seconds",
+                "risk_control.max_total_qty"
+            ]
+            
+            missing_params = []
+            for param_path in required_params:
+                value = self._get_nested_value(params, param_path)
+                logger.log_info(f"🔍 Checking {param_path}: {value}")
+                if value is None:
+                    missing_params.append(param_path)
+            
+            if missing_params:
+                logger.log_error(f"❌ Missing required parameters: {missing_params}")
+                raise ValueError(f"策略参数不完整，缺少以下必需参数: {', '.join(missing_params)}。请先在账户配置文件中设置完整参数，或通过前端界面配置所有参数。")
+            else:
+                logger.log_info(f"✅ All required parameters validated successfully")
+    
+    def _get_nested_value(self, data: Dict[str, Any], path: str):
+        """获取嵌套字典中的值"""
+        keys = path.split('.')
+        current = data
+        for key in keys:
+            if isinstance(current, dict) and key in current:
+                current = current[key]
+            else:
+                return None
+        return current
+    
+    def _load_account_specific_config(self, account: str, strategy_name: str) -> Optional[Dict[str, Any]]:
+        """加载账户特定的策略配置文件"""
+        import os
+        import json
+        from pathlib import Path
+        
+        # 确定平台和配置文件路径
+        platform_map = {
+            'BN': 'BINANCE',
+            'CW': 'COINW', 
+            'OK': 'OKX',
+            'DC': 'DEEP'
+        }
+        
+        platform = None
+        for prefix, platform_name in platform_map.items():
+            if account.startswith(prefix):
+                platform = platform_name
+                break
+        
+        if not platform:
+            logger.log_warning(f"Cannot determine platform for account: {account}")
+            return None
+        
+        config_path = f"profiles/{platform}/{account}/strategies/{strategy_name}.json"
+        
+        try:
+            if os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8-sig') as f:
+                    config = json.load(f)
+                logger.log_info(f"Loaded account-specific config: {config_path}")
+                return config
+            else:
+                logger.log_info(f"No account-specific config found: {config_path}")
+                return None
+        except Exception as e:
+            logger.log_error(f"Failed to load account config {config_path}: {e}")
+            return None
+    
+    def _flatten_strategy_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """将嵌套的策略配置展平为策略参数格式"""
+        flattened = {}
+        
+        if 'trading' in config:
+            trading = config['trading']
+            # 基本交易参数
+            flattened.update({
+                'symbol': trading.get('symbol'),
+                'order_type': trading.get('order_type'),
+                'interval': trading.get('interval'),
+                'leverage': trading.get('leverage'),
+                'mode': trading.get('mode')
+            })
+            
+            # 多头参数
+            if 'long' in trading:
+                flattened['long'] = trading['long']
+            
+            # 空头参数  
+            if 'short' in trading:
+                flattened['short'] = trading['short']
+                
+            # 对冲参数
+            if 'hedge' in trading:
+                flattened['hedge'] = trading['hedge']
+        
+        # 风险控制参数
+        if 'risk_control' in config:
+            flattened['risk_control'] = config['risk_control']
+        
+        # 执行参数
+        if 'execution' in config:
+            flattened['execution'] = config['execution']
+            
+        # 监控参数
+        if 'monitoring' in config:
+            flattened['monitoring'] = config['monitoring']
+            
+        # 安全参数
+        if 'safety' in config:
+            flattened['safety'] = config['safety']
+        
+        return flattened
+    
     def get_strategy_config(self, strategy_name: str) -> Optional[Dict[str, Any]]:
         """获取策略配置"""
         return self.plugin_loader.get_strategy_config(strategy_name)
@@ -145,10 +306,22 @@ class StrategyManager:
         if not strategy_config:
             raise ValueError(f"Strategy config not found: {strategy_name}")
         
-        # 合并参数
+        # 合并参数 - 加载账户特定配置
         final_params = strategy_config.get("default_params", {}).copy()
+        
+        # 尝试加载账户特定的配置文件
+        account_config = self._load_account_specific_config(account, strategy_name)
+        if account_config:
+            # 将嵌套的配置结构展平为策略参数格式
+            flattened_config = self._flatten_strategy_config(account_config)
+            final_params.update(flattened_config)
+        
+        # 最后应用传入的参数（具有最高优先级）
         if params:
             final_params.update(params)
+        
+        # 验证关键参数不能为null
+        self._validate_strategy_params(final_params, strategy_name)
         
         # 构建完整配置
         config = {
@@ -171,6 +344,10 @@ class StrategyManager:
             
             # 创建包装器
             wrapper = StrategyInstance(strategy, account, instance_id)
+            
+            # 设置基本属性
+            wrapper.strategy_name = strategy_name
+            wrapper.parameters = final_params
             
             # 应用实例配置
             if instance_config:
@@ -233,6 +410,8 @@ class StrategyManager:
             return False
         
         try:
+            # 记录启动时间
+            instance.strategy._start_time = time.time()
             instance.strategy.start()
             logger.log_info(f"▶️  Started strategy: {account}/{instance_id}")
             return True
@@ -291,6 +470,57 @@ class StrategyManager:
             else:
                 logger.log_warning(f"⚠️  Strategy instance not found: {account}/{instance_id}")
                 return False
+                
+        except Exception as e:
+            logger.log_error(f"❌ Failed to remove strategy instance {account}/{instance_id}: {e}")
+            return False
+    
+    def force_close_all_positions(self, account: str, instance_id: str) -> Dict[str, Any]:
+        """
+        紧急平仓并撤单 - 一键清空所有持仓和订单
+        
+        Returns:
+            Dict 包含操作结果详情
+        """
+        try:
+            account = account.upper()
+            result = {
+                "positions_closed": 0,
+                "orders_cancelled": 0,
+                "errors": [],
+                "success": False
+            }
+            
+            # 获取策略实例
+            instance = self.get_strategy_instance(account, instance_id)
+            if not instance:
+                result["errors"].append(f"策略实例未找到: {account}/{instance_id}")
+                return result
+            
+            logger.log_warning(f"🚨 开始紧急平仓: {account}/{instance_id}")
+            
+            # 真实环境：调用交易所API进行平仓
+            # TODO: 实现真实环境的平仓逻辑
+            logger.log_warning(f"⚠️ 真实环境平仓功能需要实现交易所API调用: {account}")
+            result["errors"].append("真实环境平仓功能待实现")
+            
+            # 设置成功状态
+            if len(result["errors"]) == 0:
+                result["success"] = True
+                logger.log_info(f"🎯 紧急平仓成功: {account}/{instance_id}")
+            else:
+                logger.log_error(f"❌ 紧急平仓部分失败: {result['errors']}")
+            
+            return result
+            
+        except Exception as e:
+            logger.log_error(f"❌ 紧急平仓异常: {account}/{instance_id} - {e}")
+            return {
+                "positions_closed": 0,
+                "orders_cancelled": 0,
+                "errors": [str(e)],
+                "success": False
+            }
                 
         except Exception as e:
             logger.log_error(f"❌ Failed to remove strategy instance {account}/{instance_id}: {e}")

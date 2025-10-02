@@ -12,6 +12,8 @@
     "symbol": "ETHUSDT",
     "order_type": "MARKET",
     "interval": 5,
+    "leverage": 5,
+    "mode": "dual",
     
     "long": {
       "first_qty": 0.01,
@@ -95,7 +97,7 @@
   
   "customization": {
     "_comment": "CW1602账号特定调整",
-    "account_specific_notes": "CoinW实盘账号，注意费率结�?,
+    "account_specific_notes": "CoinW实盘账号，注意费率结构",
     "last_tuned": "2025-09-30"
   }
 }

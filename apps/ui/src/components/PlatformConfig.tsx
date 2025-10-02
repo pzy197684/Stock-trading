@@ -14,6 +14,8 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "./
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "./ui/alert-dialog";
 import { Settings2, Wifi, Clock, Shield, AlertTriangle, CheckCircle, LayoutTemplate, Plus, Edit, Trash2, Save, DollarSign } from "lucide-react";
+import apiService from "../services/apiService";
+import { DEFAULT_CONFIG } from "../config/defaults";
 
 interface ParameterTemplate {
   id: string;
@@ -74,6 +76,11 @@ export function PlatformConfig() {
   const [isLoading, setIsLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   
+  // 余额数据状态
+  const [balanceSnapshot, setBalanceSnapshot] = useState<any>(null);
+  const [isLoadingBalance, setIsLoadingBalance] = useState(false);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
+  
   const [templateFormData, setTemplateFormData] = useState<Partial<ParameterTemplate>>({
     name: '',
     description: '',
@@ -82,8 +89,8 @@ export function PlatformConfig() {
       riskLevel: 50,
       stopLoss: 8,
       takeProfit: 15,
-      autoTrade: true,
-      notifications: true,
+      autoTrade: !DEFAULT_CONFIG.safety.require_manual_start,
+      notifications: DEFAULT_CONFIG.monitoring.enable_alerts,
       gridSpacing: 0.5,
       maxGrids: 20
     }
@@ -94,12 +101,12 @@ export function PlatformConfig() {
     try {
       setIsLoading(true);
       setApiError(null);
-      const response = await fetch('http://localhost:8001/api/platforms/available');
-      if (!response.ok) {
-        throw new Error(`API错误: ${response.status}`);
+      const result = await apiService.getAvailablePlatforms();
+      if (result.success && result.data?.platforms) {
+        setApiPlatforms(result.data.platforms);
+      } else {
+        throw new Error(result.error || 'API响应错误');
       }
-      const data = await response.json();
-      setApiPlatforms(data.platforms || []);
     } catch (error) {
       console.error('获取平台列表失败:', error);
       setApiError('无法连接到API服务器');
@@ -108,9 +115,147 @@ export function PlatformConfig() {
     }
   };
 
+  // 获取余额快照 - 使用模拟数据
+  const fetchBalanceSnapshot = async () => {
+    try {
+      setIsLoadingBalance(true);
+      setBalanceError(null);
+      
+      // 模拟API延迟
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // 模拟账户数据
+      const mockAccounts = {
+        'BN1602': {
+          platform: 'binance',
+          status: 'success',
+          balance: 100.0,  // 真实余额
+          available_balance: 95.0
+        },
+        'BN2055': {
+          platform: 'binance',
+          status: 'success',
+          balance: 8200.75,
+          available_balance: 8000.00
+        },
+        'BN8891': {
+          platform: 'binance',
+          status: 'error',
+          balance: 0.0,
+          available_balance: 0.0,
+          error: '连接超时'
+        }
+      };
+      
+      setBalanceSnapshot({
+        snapshot_time: new Date().toISOString(),
+        accounts: mockAccounts
+      });
+    } catch (error) {
+      console.error('获取余额快照失败:', error);
+      setBalanceError('无法获取账户余额信息');
+    } finally {
+      setIsLoadingBalance(false);
+    }
+  };
+
+  // 渲染账户信息
+  const renderAccountsList = () => {
+    if (isLoadingBalance) {
+      return (
+        <div className="text-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-2 text-sm text-muted-foreground">获取账户余额中...</p>
+        </div>
+      );
+    }
+
+    if (balanceError) {
+      return (
+        <div className="text-center py-8 text-muted-foreground">
+          <p className="text-red-500">{balanceError}</p>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="mt-2"
+            onClick={fetchBalanceSnapshot}
+          >
+            重试
+          </Button>
+        </div>
+      );
+    }
+
+    if (!balanceSnapshot || !balanceSnapshot.accounts) {
+      return (
+        <div className="text-center py-8 text-muted-foreground">
+          <p>暂无账户信息</p>
+        </div>
+      );
+    }
+
+    const accounts = Object.entries(balanceSnapshot.accounts);
+    
+    if (accounts.length === 0) {
+      return (
+        <div className="text-center py-8 text-muted-foreground">
+          <p>未找到可用账户</p>
+        </div>
+      );
+    }
+
+    return (
+      <Accordion type="single" collapsible className="w-full">
+        {accounts.map(([accountId, accountData], index) => (
+          <AccordionItem key={accountId} value={`account-${index + 1}`}>
+            <AccordionTrigger className="transition-all duration-200">
+              {accountData.status === 'success' 
+                ? `${accountId} - 余额: ${accountData.balance.toFixed(2)} USDT`
+                : `${accountId} - 状态: 连接错误`
+              }
+            </AccordionTrigger>
+            <AccordionContent className="data-[state=open]:animate-accordion-down data-[state=closed]:animate-accordion-up">
+              <div className="space-y-4 pt-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label>账户状态</Label>
+                    <p className="text-sm">{accountData.status === 'success' ? '正常' : '连接错误'}</p>
+                  </div>
+                  <div>
+                    <Label>平台</Label>
+                    <p className="text-sm">{accountData.platform?.toUpperCase() || 'Unknown'}</p>
+                  </div>
+                  <div>
+                    <Label>总余额</Label>
+                    <p className="text-sm">{accountData.balance?.toFixed(2) || '0.00'} USDT</p>
+                  </div>
+                  <div>
+                    <Label>可用余额</Label>
+                    <p className="text-sm">{accountData.available_balance?.toFixed(2) || '0.00'} USDT</p>
+                  </div>
+                  {accountData.error && (
+                    <div className="col-span-2">
+                      <Label>错误信息</Label>
+                      <p className="text-sm text-red-500">{accountData.error}</p>
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" className="transition-all duration-200">编辑配置</Button>
+                  <Button size="sm" variant="outline" className="transition-all duration-200">刷新余额</Button>
+                </div>
+              </div>
+            </AccordionContent>
+          </AccordionItem>
+        ))}
+      </Accordion>
+    );
+  };
+
   // 初始化数据
   useEffect(() => {
     fetchPlatforms();
+    fetchBalanceSnapshot();
   }, []);
 
   const [platformConfigs, setPlatformConfigs] = useState<Record<string, PlatformConfig>>({
@@ -420,8 +565,8 @@ export function PlatformConfig() {
         riskLevel: 50,
         stopLoss: 8,
         takeProfit: 15,
-        autoTrade: true,
-        notifications: true,
+        autoTrade: !DEFAULT_CONFIG.safety.require_manual_start,
+        notifications: DEFAULT_CONFIG.monitoring.enable_alerts,
         gridSpacing: 0.5,
         maxGrids: 20
       }
@@ -555,8 +700,8 @@ export function PlatformConfig() {
                         riskLevel: 50,
                         stopLoss: 8,
                         takeProfit: 15,
-                        autoTrade: true,
-                        notifications: true,
+                        autoTrade: !DEFAULT_CONFIG.safety.require_manual_start,
+                        notifications: DEFAULT_CONFIG.monitoring.enable_alerts,
                         gridSpacing: 0.5,
                         maxGrids: 20
                       }
@@ -664,67 +809,7 @@ export function PlatformConfig() {
               <CardTitle>平台账户管理</CardTitle>
             </CardHeader>
             <CardContent>
-              <Accordion type="single" collapsible className="w-full">
-                <AccordionItem value="account-1">
-                  <AccordionTrigger className="transition-all duration-200">主账户 - 余额: 12,500.50 USDT</AccordionTrigger>
-                  <AccordionContent className="data-[state=open]:animate-accordion-down data-[state=closed]:animate-accordion-up">
-                    <div className="space-y-4 pt-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <Label>账户状态</Label>
-                          <p className="text-sm">正常</p>
-                        </div>
-                        <div>
-                          <Label>API权限</Label>
-                          <p className="text-sm">交易、查询</p>
-                        </div>
-                        <div>
-                          <Label>最后活跃</Label>
-                          <p className="text-sm">2024-09-19 14:35</p>
-                        </div>
-                        <div>
-                          <Label>今日交易次数</Label>
-                          <p className="text-sm">47</p>
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button size="sm" className="transition-all duration-200">编辑配置</Button>
-                        <Button size="sm" variant="outline" className="transition-all duration-200">禁用账户</Button>
-                      </div>
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-                
-                <AccordionItem value="account-2">
-                  <AccordionTrigger className="transition-all duration-200">副账户 - 余额: 8,200.75 USDT</AccordionTrigger>
-                  <AccordionContent className="data-[state=open]:animate-accordion-down data-[state=closed]:animate-accordion-up">
-                    <div className="space-y-4 pt-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <Label>账户状态</Label>
-                          <p className="text-sm">正常</p>
-                        </div>
-                        <div>
-                          <Label>API权限</Label>
-                          <p className="text-sm">仅查询</p>
-                        </div>
-                        <div>
-                          <Label>最后活跃</Label>
-                          <p className="text-sm">2024-09-19 13:20</p>
-                        </div>
-                        <div>
-                          <Label>今日交易次数</Label>
-                          <p className="text-sm">23</p>
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button size="sm" className="transition-all duration-200">编辑配置</Button>
-                        <Button size="sm" variant="outline" className="transition-all duration-200">禁用账户</Button>
-                      </div>
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
+              {renderAccountsList()}
             </CardContent>
           </Card>
         </TabsContent>

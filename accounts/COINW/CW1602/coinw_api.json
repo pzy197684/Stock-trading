@@ -4,6 +4,8 @@
   "_created": "2025-09-30",
   "_account": "CW1602",
   
+  "owner": "潘正友",
+  
   "api_config": {
     "api_key": "YOUR_COINW_API_KEY_HERE",
     "api_secret": "YOUR_COINW_API_SECRET_HERE",

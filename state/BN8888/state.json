@@ -1,0 +1,55 @@
+{
+  "long": {
+    "qty": 0,
+    "avg_price": 0,
+    "add_times": 0,
+    "last_add_time": null,
+    "hedge_locked": false,
+    "hedge_stop": false,
+    "locked_profit": 0,
+    "round": 0,
+    "last_qty": 0,
+    "opposite_qty": 0,
+    "last_entry_price": 0,
+    "last_fill_price": 0,
+    "last_fill_ts": 0,
+    "last_open_ts": 0,
+    "fast_add_paused_until": 0,
+    "cooldown_until": 0
+  },
+  "short": {
+    "qty": 0,
+    "avg_price": 0,
+    "add_times": 0,
+    "last_add_time": null,
+    "hedge_locked": false,
+    "hedge_stop": false,
+    "locked_profit": 0,
+    "round": 0,
+    "last_qty": 0,
+    "opposite_qty": 0,
+    "last_entry_price": 0,
+    "last_fill_price": 0,
+    "last_fill_ts": 0,
+    "last_open_ts": 0,
+    "fast_add_paused_until": 0,
+    "cooldown_until": 0
+  },
+  "metrics": {
+    "nv_prev": 0.0,
+    "last_snapshot_date": ""
+  },
+  "pause_until": null,
+  "schema_hydrated": {},
+  "backfill_done": {},
+  "metadata": {
+    "created_at": "2025-10-01T15:03:27.311954+00:00",
+    "updated_at": "2025-10-01T15:03:27.313951+00:00",
+    "version": "2.0.0",
+    "account": "BN8888",
+    "platform": "",
+    "strategy": "martingale_hedge",
+    "status": "initialized",
+    "strategy_instance": "martingale_hedge_1_1759331007"
+  }
+}

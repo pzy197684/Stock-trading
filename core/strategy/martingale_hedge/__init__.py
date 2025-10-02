@@ -40,7 +40,7 @@ from core.strategy.martingale_hedge import MartingaleHedgeStrategy
 config = {
     "name": "martingale_hedge_ethusdt",
     "params": {
-        "symbol": "ETHUSDT",
+        "symbol": "OPUSDT",
         "long": {"first_qty": 0.01, ...},
         "short": {"first_qty": 0.01, ...},
         "hedge": {"trigger_loss": 0.05, ...}

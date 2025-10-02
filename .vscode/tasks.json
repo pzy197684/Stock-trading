@@ -1,0 +1,56 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "启动交易系统",
+            "type": "shell",
+            "command": "${workspaceFolder}\\start-trading.bat",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new"
+            }
+        },
+        {
+            "label": "停止交易系统",
+            "type": "shell",
+            "command": "${workspaceFolder}\\stop-services.bat",
+            "group": "build"
+        },
+        {
+            "label": "健康检查",
+            "type": "shell",
+            "command": "${workspaceFolder}\\health-check.bat",
+            "group": "test"
+        },
+        {
+            "label": "启动API服务器",
+            "type": "shell",
+            "command": "D:/psw/Stock-trading/apps/api/venv/Scripts/python.exe",
+            "args": [
+                "apps/api/main.py"
+            ],
+            "group": "build",
+            "isBackground": true
+        },
+        {
+            "label": "启动前端服务器",
+            "type": "shell",
+            "command": "npm",
+            "args": [
+                "run",
+                "dev"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/apps/ui"
+            },
+            "group": "build",
+            "isBackground": true
+        }
+    ]
+}

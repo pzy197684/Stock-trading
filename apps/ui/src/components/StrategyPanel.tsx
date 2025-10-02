@@ -3,6 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Progress } from "./ui/progress";
 import { Zap, TrendingUp, BarChart3, Shuffle, Target, Shield } from "lucide-react";
+import { getStrategyDisplayName } from "../utils/strategyNames";
+import apiService from "../services/apiService";
 
 interface Strategy {
   id: string;
@@ -32,12 +34,12 @@ export function StrategyPanel() {
     try {
       setIsLoading(true);
       setApiError(null);
-      const response = await fetch('http://localhost:8001/api/strategies/available');
-      if (!response.ok) {
-        throw new Error(`API错误: ${response.status}`);
+      const result = await apiService.getAvailableStrategies();
+      if (result.success && result.data?.strategies) {
+        setApiStrategies(result.data.strategies);
+      } else {
+        throw new Error(result.error || 'API响应错误');
       }
-      const data = await response.json();
-      setApiStrategies(data.strategies || []);
     } catch (error) {
       console.error('获取策略列表失败:', error);
       setApiError('无法连接到API服务器');
@@ -188,7 +190,7 @@ export function StrategyPanel() {
                 <div className="flex items-center gap-3">
                   {getCategoryIcon(strategy.category)}
                   <div>
-                    <CardTitle className="text-xl">{strategy.name}</CardTitle>
+                    <CardTitle className="text-xl">{getStrategyDisplayName(strategy.name)}</CardTitle>
                     <p className="text-sm text-muted-foreground mt-1">{strategy.category}</p>
                   </div>
                 </div>

@@ -2,6 +2,8 @@
   "_comment": "Binance期货API密钥配置 - 实盘账户BN1602",
   "_warning": "这是生产环境配置，请确保API密钥安全",
   
+  "owner": "潘正友",
+  
   "API_KEY": "mxtt4BRTBS0SYvEA9tuKXShhPUpwEWYF1V6x8okyaUBm3YfIxfv0EAVDqmgB6mLQ",
   "API_SECRET": "j64A1vetky2BAFleZM46ZsS0SdkOPVybqBQ3miWsYi7rPHuyEfckpvIa9jxqN8gJ",
   

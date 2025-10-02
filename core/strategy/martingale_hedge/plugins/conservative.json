@@ -1,0 +1,43 @@
+{
+  "id": "conservative",
+  "name": "保守型",
+  "description": "低风险、稳健收益的马丁对冲参数配置",
+  "strategy": "martingale_hedge",
+  "risk_level": "low",
+  "parameters": {
+    "long": {
+      "first_qty": 0.005,
+      "add_ratio": 1.5,
+      "add_interval": 0.03,
+      "max_add_times": 2,
+      "tp_first_order": 0.015,
+      "tp_before_full": 0.02,
+      "tp_after_full": 0.025
+    },
+    "short": {
+      "first_qty": 0.005,
+      "add_ratio": 1.5,
+      "add_interval": 0.03,
+      "max_add_times": 2,
+      "tp_first_order": 0.015,
+      "tp_before_full": 0.02,
+      "tp_after_full": 0.025
+    },
+    "hedge": {
+      "trigger_loss": 0.08,
+      "equal_eps": 0.02,
+      "min_wait_seconds": 120,
+      "release_tp_after_full": {
+        "long": 0.03,
+        "short": 0.03
+      },
+      "release_sl_loss_ratio": {
+        "long": 1.2,
+        "short": 1.2
+      }
+    }
+  },
+  "recommended_capital": 1000,
+  "max_drawdown_expected": 0.15,
+  "notes": "适合新手和风险厌恶型交易者，参数相对保守，最大回撤控制在15%以内"
+}

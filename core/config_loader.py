@@ -51,13 +51,25 @@ class ConfigLoader:
             return (v or default)
         account = account or _get_env("ACCOUNT", "BN8891")
         base_dir = _get_env("ACCOUNTS_DIR", "accounts")
-        base_path = os.path.join(base_dir, account)
+        
+        # 修复路径格式：accounts/PLATFORM/ACCOUNT/platform_api.json
+        platform_upper = exchange.upper()
+        base_path = os.path.join(base_dir, platform_upper, account)
         key_path = os.path.join(base_path, f"{exchange}_api.json")
+        
+        # 如果新路径不存在，尝试旧格式
         if not os.path.exists(key_path):
-            logger.log_error(f"⚠️ API 密钥文件不存在：{key_path}")
-            return None, None
+            old_base_path = os.path.join(base_dir, account)
+            old_key_path = os.path.join(old_base_path, f"{exchange}_api.json")
+            if os.path.exists(old_key_path):
+                key_path = old_key_path
+                logger.log_info(f"使用旧格式API密钥文件: {key_path}")
+            else:
+                logger.log_error(f"⚠️ API 密钥文件不存在：{key_path}")
+                return None, None
+                
         try:
-            with open(key_path, "r", encoding="utf-8") as f:
+            with open(key_path, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)
             api_key = data.get("API_KEY") or data.get("apiKey")
             api_secret = data.get("API_SECRET") or data.get("apiSecret")
@@ -70,8 +82,35 @@ class ConfigLoader:
             logger.log_error(f"❌ 加载 API 密钥失败: {e}")
             return None, None
 
+    def load_api_config(self, exchange="binance", account=None):
+        """加载完整的API配置，包括testnet设置等"""
+        def _get_env(k, default=None):
+            v = os.environ.get(k)
+            return (v or default)
+        account = account or _get_env("ACCOUNT", "BN8891")
+        base_dir = _get_env("ACCOUNTS_DIR", "accounts")
+        base_path = os.path.join(base_dir, account)
+        key_path = os.path.join(base_path, f"{exchange}_api.json")
+        if not os.path.exists(key_path):
+            logger.log_error(f"⚠️ API 配置文件不存在：{key_path}")
+            return None
+        try:
+            with open(key_path, "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+            api_key = data.get("API_KEY") or data.get("apiKey")
+            api_secret = data.get("API_SECRET") or data.get("apiSecret")
+            if not api_key or not api_secret:
+                logger.log_error(f"⚠️ API 配置文件密钥字段缺失：{key_path}")
+                return None
+            logger.log_info(f"✅ 成功加载 API 配置文件: {key_path}")
+            return data
+        except Exception as e:
+            logger.log_error(f"❌ 加载 API 配置失败: {e}")
+            return None
+
 # 单例
 _loader = ConfigLoader()
 get_config_path = _loader.get_config_path
 load_config = _loader.load_config
 load_api_keys = _loader.load_api_keys
+load_api_config = _loader.load_api_config

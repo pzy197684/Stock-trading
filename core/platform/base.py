@@ -287,3 +287,36 @@ class ExchangeIf(ABC):
             return str(value) if value is not None else default
         except (ValueError, TypeError):
             return default
+
+    def set_leverage(self, symbol: str, leverage: int) -> Dict[str, Any]:
+        """
+        设置交易对的杠杆倍数（期货交易）
+        
+        Args:
+            symbol: 交易对
+            leverage: 杠杆倍数
+            
+        Returns:
+            成功返回：{
+                "error": False,
+                "symbol": str,
+                "leverage": int
+            }
+        """
+        return create_error_response("set_leverage not implemented")
+
+    def get_leverage(self, symbol: str) -> Dict[str, Any]:
+        """
+        获取交易对的当前杠杆倍数
+        
+        Args:
+            symbol: 交易对
+            
+        Returns:
+            成功返回：{
+                "error": False,
+                "symbol": str,
+                "leverage": int
+            }
+        """
+        return create_error_response("get_leverage not implemented")

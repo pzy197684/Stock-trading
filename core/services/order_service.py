@@ -217,15 +217,15 @@ def close_position_with_retry(platform, symbol: str, positionSide: str, *, rate:
 # 适配锁仓/解锁业务的下单与平仓接口
 def call_place_order(symbol, side, positionSide, quantity, order_type, api_key, api_secret):
     # 你可根据实际平台实现
-    # 示例：直接调用平台下单
-    # return place_order(...)
-    logger.log_info(f"[MOCK] 下单: {symbol} {side} {positionSide} {quantity} {order_type}")
-    return {"orderId": "mock123", "side": side, "qty": quantity}
+    # TODO: 实现真实的下单逻辑
+    logger.log_info(f"下单: {symbol} {side} {positionSide} {quantity} {order_type}")
+    raise NotImplementedError("需要实现真实的下单API")
 
 def call_close_position(symbol, positionSide, qty_base, api_key, api_secret):
-    # 你可根据实际平台实现
-    logger.log_info(f"[MOCK] 平仓: {symbol} {positionSide} {qty_base}")
-    return {"orderId": "mock_close", "qty": qty_base}
+    """平仓 - 需要实现真实的交易所API调用"""
+    # TODO: 实现真实的平仓逻辑
+    logger.log_info(f"平仓: {symbol} {positionSide} {qty_base}")
+    raise NotImplementedError("需要实现真实的平仓API")
 # core/services/order_service.py
 # 功能：订单服务，负责生成和执行订单
 from core.platform.base import ExchangeIf
@@ -238,7 +238,7 @@ def build_order(strategy: StrategyBase, plan: dict) -> dict:
     """
     
     # 从策略实例中获取必要的信息
-    symbol = plan["symbol"] if "symbol" in plan else strategy.config.get("symbol", "ETHUSDT")
+    symbol = plan["symbol"] if "symbol" in plan else strategy.config.get("symbol", "OPUSDT")
     qty = plan["qty"] if "qty" in plan else strategy.config.get("quantity", 1)
     price = plan["price"] if "price" in plan else strategy.config.get("price", 5000)
     side = plan["side"] if "side" in plan else "buy"

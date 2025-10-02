@@ -8,12 +8,21 @@ from core.platform.base import ExchangeIf, create_error_response, create_success
 from core.domain.enums import PositionField
 from core.logger import logger
 
-_BASE = "https://fapi.binance.com"
+_BASE_MAINNET = "https://fapi.binance.com"
+_BASE_TESTNET = "https://testnet.binancefuture.com"
 
 
 class BinanceExchange(ExchangeIf):
+    
+    def __init__(self, api_key: str, api_secret: str, **kwargs):
+        super().__init__(api_key, api_secret, **kwargs)
+        # 检查是否是测试网络环境
+        self.is_testnet = kwargs.get('testnet', False)
+        self.base_url = _BASE_TESTNET if self.is_testnet else _BASE_MAINNET
+        logger.log_info(f"BinanceExchange initialized: testnet={self.is_testnet}, base_url={self.base_url}")
+    
     def name(self) -> str:
-        return "Binance"
+        return "Binance" + (" Testnet" if self.is_testnet else "")
 
     def capabilities(self) -> dict:
         return {
@@ -157,10 +166,10 @@ class BinanceExchange(ExchangeIf):
         return {"long": {"qty": 0, "avg_price": 0}, "short": {"qty": 0, "avg_price": 0}}
 
     def place_order(self, order_req: dict) -> dict:
-        # Placeholder: the framework uses platform.place_order in order_service; for safety keep mock behaviour unless keys provided
+        """下单 - 实盘环境必须提供正确的API凭证"""
         if not self.api_key or not self.api_secret:
-            logger.log_warning("[BinanceExchange] place_order called without api credentials; returning mock response")
-            return {"orderId": "mock_binance_1", "status": "NEW", "req": order_req}
+            raise ValueError("[BinanceExchange] API凭证未配置，无法进行实盘交易")
+        
         # Real implementation: POST to /fapi/v1/order with form-encoded body
         params = {}
         # map common fields
@@ -213,17 +222,172 @@ class BinanceExchange(ExchangeIf):
         # For Binance futures symbol is typically already like ETHUSDT; keep as-is
         return symbol
 
+    def _get_server_time(self):
+        """获取Binance服务器时间，用于避免时间同步问题"""
+        try:
+            response = requests.get(f"{self.base_url}/fapi/v1/time", timeout=5)
+            if response.status_code == 200:
+                return response.json()['serverTime']
+        except Exception as e:
+            logger.log_warning(f"[BinanceExchange] Failed to get server time: {e}")
+        # 如果获取服务器时间失败，fallback到本地时间
+        return int(time.time() * 1000)
+
     def _build_signed_url_headers(self, path: str, params: dict | None = None, content_type: str | None = None):
         """Construct signed URL and headers for a given path and params.
 
         Returns (url, headers). This helper centralizes timestamp/signing logic for easier testing.
         """
         params = dict(params or {})
-        params.setdefault("timestamp", int(time.time() * 1000))
+        # 使用服务器时间而不是本地时间，避免时间同步问题
+        params.setdefault("timestamp", self._get_server_time())
         qs = urlencode(params, doseq=True)
         sig = hmac.new(self.api_secret.encode(), qs.encode(), hashlib.sha256).hexdigest()
-        url = f"{_BASE}{path}?{qs}&signature={sig}"
+        url = f"{self.base_url}{path}?{qs}&signature={sig}"
         headers = {"X-MBX-APIKEY": self.api_key}
         if content_type:
             headers["Content-Type"] = content_type
         return url, headers
+
+    def get_account_info(self) -> dict:
+        """获取账户信息"""
+        if not self.api_key or not self.api_secret:
+            logger.log_warning("[BinanceExchange] get_account_info called without api credentials")
+            return create_error_response("No API credentials provided")
+        
+        res = self._signed_get("/fapi/v2/account")
+        if isinstance(res, dict):
+            if res.get("error"):
+                return res  # Already an error response
+            elif res.get("totalWalletBalance") is not None:
+                return create_success_response({
+                    "balance": float(res.get("totalWalletBalance", 0)),
+                    "available_balance": float(res.get("availableBalance", 0)),
+                    "raw": res
+                })
+            else:
+                return create_error_response("Invalid account info response", raw=res)
+        else:
+            return create_error_response("Invalid response type", raw=res)
+
+    def get_position(self, symbol: str) -> dict:
+        """获取单个交易对的持仓信息"""
+        if not self.api_key or not self.api_secret:
+            logger.log_warning("[BinanceExchange] get_position called without api credentials")
+            return create_error_response("No API credentials provided")
+        
+        params = {"symbol": symbol}
+        res = self._signed_get("/fapi/v2/positionRisk", params)
+        if isinstance(res, list):
+            for position in res:
+                if position.get("symbol") == symbol:
+                    try:
+                        position_amt = float(position.get("positionAmt", 0) or 0)
+                        entry_price = float(position.get("entryPrice", 0) or 0)
+                        return create_success_response({
+                            "symbol": symbol,
+                            "size": abs(position_amt),
+                            "side": "long" if position_amt > 0 else "short" if position_amt < 0 else "none",
+                            "entry_price": entry_price,
+                            "raw": position
+                        })
+                    except (ValueError, TypeError):
+                        return create_error_response("Invalid position data", raw=position)
+            return create_success_response({
+                "symbol": symbol,
+                "size": 0,
+                "side": "none",
+                "entry_price": 0
+            })
+        elif isinstance(res, dict) and res.get("error"):
+            return res  # Already an error response
+        else:
+            return create_error_response("Invalid response type", raw=res)
+
+    def set_leverage(self, symbol: str, leverage: int) -> dict:
+        """设置交易对的杠杆倍数"""
+        if not self.api_key or not self.api_secret:
+            logger.log_warning("[BinanceExchange] set_leverage called without api credentials")
+            return create_error_response("No API credentials provided")
+        
+        if leverage < 1 or leverage > 125:
+            return create_error_response(f"Invalid leverage value: {leverage}, must be between 1 and 125")
+        
+        params = {
+            "symbol": symbol,
+            "leverage": leverage
+        }
+        
+        res = self._signed_post("/fapi/v1/leverage", params)
+        if isinstance(res, dict):
+            if res.get("error"):
+                return res  # Already an error response
+            elif "leverage" in res and "symbol" in res:
+                logger.log_info(f"✅ Binance杠杆设置成功: {symbol} -> {leverage}x")
+                return create_success_response({
+                    "symbol": res.get("symbol"),
+                    "leverage": int(res.get("leverage")),
+                    "maxNotionalValue": res.get("maxNotionalValue"),
+                    "raw": res
+                })
+            else:
+                return create_error_response("Invalid leverage response", raw=res)
+        else:
+            return create_error_response("Invalid response type", raw=res)
+
+    def get_market_price(self, symbol: str) -> dict:
+        """获取市场最新价格"""
+        # 使用公开接口获取ticker价格，不需要签名
+        url = f"{self.base_url}/fapi/v1/ticker/price"
+        params = {"symbol": symbol}
+        
+        try:
+            r = requests.get(url, params=params, timeout=(3.05, 10))
+            if not r.ok:
+                text = getattr(r, "text", "")
+                logger.log_warning(f"[BinanceExchange] GET ticker/price returned {r.status_code}: {text}")
+                return create_error_response(f"http {r.status_code}", raw=text)
+            
+            try:
+                data = r.json()
+                if "price" in data:
+                    return create_success_response({
+                        "symbol": data.get("symbol", symbol),
+                        "price": float(data["price"]),
+                        "timestamp": int(time.time() * 1000)
+                    })
+                else:
+                    return create_error_response("Invalid ticker response", raw=data)
+            except (ValueError, TypeError) as e:
+                return create_error_response("Invalid price data", raw=str(e))
+                
+        except Exception as e:
+            logger.log_error(f"[BinanceExchange] get_market_price error: {e}")
+            return create_error_response("Network error", raw=str(e))
+
+    def get_leverage(self, symbol: str) -> dict:
+        """获取交易对的当前杠杆倍数"""
+        if not self.api_key or not self.api_secret:
+            logger.log_warning("[BinanceExchange] get_leverage called without api credentials")
+            return create_error_response("No API credentials provided")
+        
+        params = {"symbol": symbol}
+        res = self._signed_get("/fapi/v2/positionRisk", params)
+        
+        if isinstance(res, list):
+            for position in res:
+                if position.get("symbol") == symbol:
+                    try:
+                        leverage = int(float(position.get("leverage", 1)))
+                        return create_success_response({
+                            "symbol": symbol,
+                            "leverage": leverage,
+                            "raw": position
+                        })
+                    except (ValueError, TypeError):
+                        return create_error_response("Invalid leverage data", raw=position)
+            return create_error_response(f"Symbol {symbol} not found")
+        elif isinstance(res, dict) and res.get("error"):
+            return res  # Already an error response
+        else:
+            return create_error_response("Invalid response type", raw=res)
