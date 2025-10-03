@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API标准化验证测试</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 20px; 
+            background-color: #f5f5f5; 
+        }
+        .container { 
+            max-width: 1200px; 
+            margin: 0 auto; 
+            background: white; 
+            padding: 20px; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1); 
+        }
+        .test-section { 
+            margin: 20px 0; 
+            padding: 15px; 
+            border: 1px solid #ddd; 
+            border-radius: 5px; 
+        }
+        .test-title { 
+            color: #333; 
+            margin-bottom: 10px; 
+            font-weight: bold; 
+        }
+        .result { 
+            padding: 10px; 
+            margin: 10px 0; 
+            border-radius: 4px; 
+            white-space: pre-wrap; 
+            font-family: monospace; 
+            max-height: 300px; 
+            overflow-y: auto; 
+        }
+        .success { 
+            background-color: #d4edda; 
+            border: 1px solid #c3e6cb; 
+            color: #155724; 
+        }
+        .error { 
+            background-color: #f8d7da; 
+            border: 1px solid #f5c6cb; 
+            color: #721c24; 
+        }
+        .info { 
+            background-color: #d1ecf1; 
+            border: 1px solid #bee5eb; 
+            color: #0c5460; 
+        }
+        button { 
+            background-color: #007bff; 
+            color: white; 
+            border: none; 
+            padding: 8px 16px; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            margin: 5px; 
+        }
+        button:hover { 
+            background-color: #0056b3; 
+        }
+        .loading { 
+            color: #6c757d; 
+            font-style: italic; 
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 API标准化验证测试工具</h1>
+        <p>验证修复后的API接口是否正确返回标准化数据格式</p>
+
+        <div class="test-section">
+            <div class="test-title">1. 运行实例API测试</div>
+            <button onclick="testRunningInstances()">测试 /api/running/instances</button>
+            <div id="result-instances" class="result info">点击按钮开始测试...</div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-title">2. 配置文件API测试</div>
+            <button onclick="testConfigProfiles()">测试 /api/config/profiles</button>
+            <div id="result-config" class="result info">点击按钮开始测试...</div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-title">3. 日志文件API测试</div>
+            <button onclick="testLogFiles()">测试 /api/logs/file</button>
+            <div id="result-logs" class="result info">点击按钮开始测试...</div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-title">4. 数据结构验证</div>
+            <button onclick="validateDataStructures()">验证数据结构一致性</button>
+            <div id="result-validation" class="result info">点击按钮开始验证...</div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-title">5. WebSocket连接测试</div>
+            <button onclick="testWebSocket()">测试 WebSocket 连接</button>
+            <button onclick="disconnectWebSocket()">断开连接</button>
+            <div id="result-websocket" class="result info">点击按钮开始测试...</div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-title">6. 综合测试</div>
+            <button onclick="runAllTests()">运行所有测试</button>
+            <div id="result-all" class="result info">点击按钮开始综合测试...</div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8001';
+        let ws = null;
+
+        // 显示结果的通用函数
+        function showResult(elementId, content, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.textContent = content;
+            element.className = `result ${type}`;
+        }
+
+        // 格式化JSON显示
+        function formatJSON(obj) {
+            return JSON.stringify(obj, null, 2);
+        }
+
+        // 测试运行实例API
+        async function testRunningInstances() {
+            showResult('result-instances', '正在测试运行实例API...', 'loading');
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/running/instances`);
+                const data = await response.json();
+                
+                // 验证响应格式
+                if (data.success && data.data && data.data.instances) {
+                    const instances = data.data.instances;
+                    let result = `✅ 测试成功！\n\n`;
+                    result += `响应格式验证: ${data.success ? '✅' : '❌'}\n`;
+                    result += `数据结构: ${data.data ? '✅' : '❌'}\n`;
+                    result += `实例数组: ${Array.isArray(instances) ? '✅' : '❌'}\n`;
+                    result += `总实例数: ${data.data.total}\n`;
+                    result += `运行中: ${data.data.running}\n`;
+                    result += `已停止: ${data.data.stopped}\n\n`;
+                    
+                    if (instances.length > 0) {
+                        result += `示例实例数据:\n`;
+                        const example = instances[0];
+                        result += `ID: ${example.id}\n`;
+                        result += `账户: ${example.account}\n`;
+                        result += `平台: ${example.platform}\n`;
+                        result += `策略: ${example.strategy}\n`;
+                        result += `状态: ${example.status}\n`;
+                        result += `交易对: ${example.symbol}\n`;
+                        result += `盈利: ${example.profit}\n`;
+                        result += `盈利率: ${example.profit_rate}%\n`;
+                    }
+                    
+                    showResult('result-instances', result, 'success');
+                } else {
+                    showResult('result-instances', `❌ 响应格式错误:\n${formatJSON(data)}`, 'error');
+                }
+            } catch (error) {
+                showResult('result-instances', `❌ 请求失败: ${error.message}`, 'error');
+            }
+        }
+
+        // 测试配置文件API
+        async function testConfigProfiles() {
+            showResult('result-config', '正在测试配置文件API...', 'loading');
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/config/profiles`);
+                const data = await response.json();
+                
+                if (data.success && data.data) {
+                    let result = `✅ 配置文件API测试成功！\n\n`;
+                    result += `响应格式: ${data.success ? '✅' : '❌'}\n`;
+                    result += `总平台数: ${data.data.total_platforms}\n`;
+                    result += `总账户数: ${data.data.total_accounts}\n`;
+                    result += `配置文件列表: ${data.data.profiles ? '✅' : '❌'}\n\n`;
+                    
+                    showResult('result-config', result, 'success');
+                } else {
+                    showResult('result-config', `❌ 响应格式错误:\n${formatJSON(data)}`, 'error');
+                }
+            } catch (error) {
+                showResult('result-config', `❌ 请求失败: ${error.message}`, 'error');
+            }
+        }
+
+        // 测试日志文件API
+        async function testLogFiles() {
+            showResult('result-logs', '正在测试日志文件API...', 'loading');
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/logs/file?path=runtime.log`);
+                const data = await response.json();
+                
+                if (data.success && data.data && data.data.logs) {
+                    let result = `✅ 日志文件API测试成功！\n\n`;
+                    result += `响应格式: ${data.success ? '✅' : '❌'}\n`;
+                    result += `日志数组: ${Array.isArray(data.data.logs) ? '✅' : '❌'}\n`;
+                    result += `总日志条数: ${data.data.total}\n`;
+                    result += `文件信息: ${data.data.file_info ? '✅' : '❌'}\n\n`;
+                    
+                    if (data.data.logs.length > 0) {
+                        result += `最新日志示例:\n`;
+                        const latestLog = data.data.logs[data.data.logs.length - 1];
+                        result += `时间: ${latestLog.timestamp}\n`;
+                        result += `级别: ${latestLog.level}\n`;
+                        result += `消息: ${latestLog.message.substring(0, 100)}...\n`;
+                    }
+                    
+                    showResult('result-logs', result, 'success');
+                } else {
+                    showResult('result-logs', `❌ 响应格式错误:\n${formatJSON(data)}`, 'error');
+                }
+            } catch (error) {
+                showResult('result-logs', `❌ 请求失败: ${error.message}`, 'error');
+            }
+        }
+
+        // 验证数据结构一致性
+        async function validateDataStructures() {
+            showResult('result-validation', '正在验证数据结构一致性...', 'loading');
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/running/instances`);
+                const data = await response.json();
+                
+                if (!data.success || !data.data || !data.data.instances) {
+                    showResult('result-validation', '❌ 无法获取实例数据进行验证', 'error');
+                    return;
+                }
+                
+                let result = `🔍 数据结构一致性验证:\n\n`;
+                let allValid = true;
+                
+                // 检查每个实例的数据结构
+                data.data.instances.forEach((instance, index) => {
+                    result += `实例 ${index + 1} (${instance.id}):\n`;
+                    
+                    // 必需字段检查
+                    const requiredFields = ['id', 'account', 'platform', 'strategy', 'status', 'symbol'];
+                    requiredFields.forEach(field => {
+                        const hasField = instance.hasOwnProperty(field) && instance[field] !== null;
+                        result += `  ${field}: ${hasField ? '✅' : '❌'}\n`;
+                        if (!hasField) allValid = false;
+                    });
+                    
+                    // 状态值检查
+                    const validStatuses = ['running', 'stopped', 'error', 'starting'];
+                    const statusValid = validStatuses.includes(instance.status);
+                    result += `  状态值有效: ${statusValid ? '✅' : '❌'} (${instance.status})\n`;
+                    if (!statusValid) allValid = false;
+                    
+                    // 数值字段检查
+                    const numericFields = ['profit', 'profit_rate'];
+                    numericFields.forEach(field => {
+                        const isNumeric = typeof instance[field] === 'number';
+                        result += `  ${field}数值: ${isNumeric ? '✅' : '❌'}\n`;
+                        if (!isNumeric && instance[field] !== null) allValid = false;
+                    });
+                    
+                    result += '\n';
+                });
+                
+                result += `\n📊 总体验证结果: ${allValid ? '✅ 所有数据结构符合标准' : '❌ 存在数据结构问题'}`;
+                
+                showResult('result-validation', result, allValid ? 'success' : 'error');
+                
+            } catch (error) {
+                showResult('result-validation', `❌ 验证失败: ${error.message}`, 'error');
+            }
+        }
+
+        // 测试WebSocket连接
+        function testWebSocket() {
+            if (ws) {
+                ws.close();
+            }
+            
+            showResult('result-websocket', '正在连接WebSocket...', 'loading');
+            
+            try {
+                ws = new WebSocket('ws://localhost:8001/ws/logs');
+                let messages = [];
+                
+                ws.onopen = () => {
+                    showResult('result-websocket', '✅ WebSocket连接成功！\n等待日志消息...', 'success');
+                };
+                
+                ws.onmessage = (event) => {
+                    try {
+                        const message = JSON.parse(event.data);
+                        messages.push(message);
+                        
+                        let result = `✅ WebSocket连接正常！\n\n`;
+                        result += `已接收消息数: ${messages.length}\n\n`;
+                        result += `最新消息:\n`;
+                        result += `类型: ${message.type}\n`;
+                        result += `时间: ${new Date().toLocaleTimeString()}\n`;
+                        
+                        if (message.data) {
+                            result += `数据: ${JSON.stringify(message.data, null, 2)}`;
+                        }
+                        
+                        showResult('result-websocket', result, 'success');
+                        
+                    } catch (e) {
+                        showResult('result-websocket', `❌ 消息解析错误: ${e.message}`, 'error');
+                    }
+                };
+                
+                ws.onerror = (error) => {
+                    showResult('result-websocket', `❌ WebSocket错误: ${error}`, 'error');
+                };
+                
+                ws.onclose = () => {
+                    showResult('result-websocket', '🔌 WebSocket连接已关闭', 'info');
+                };
+                
+            } catch (error) {
+                showResult('result-websocket', `❌ WebSocket连接失败: ${error.message}`, 'error');
+            }
+        }
+
+        // 断开WebSocket连接
+        function disconnectWebSocket() {
+            if (ws) {
+                ws.close();
+                ws = null;
+                showResult('result-websocket', '🔌 WebSocket连接已手动断开', 'info');
+            } else {
+                showResult('result-websocket', '❌ 没有活动的WebSocket连接', 'error');
+            }
+        }
+
+        // 运行所有测试
+        async function runAllTests() {
+            showResult('result-all', '🚀 开始运行综合测试...', 'loading');
+            
+            let allResults = '';
+            
+            // 依次运行所有测试
+            const tests = [
+                { name: '运行实例API', func: testRunningInstances },
+                { name: '配置文件API', func: testConfigProfiles },
+                { name: '日志文件API', func: testLogFiles },
+                { name: '数据结构验证', func: validateDataStructures }
+            ];
+            
+            for (let test of tests) {
+                allResults += `\n=== ${test.name} ===\n`;
+                try {
+                    await test.func();
+                    allResults += '✅ 测试完成\n';
+                } catch (error) {
+                    allResults += `❌ 测试失败: ${error.message}\n`;
+                }
+                
+                // 短暂延迟避免请求过快
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+            
+            allResults += '\n🎯 综合测试完成！';
+            allResults += '\n请查看各个模块的详细测试结果。';
+            
+            showResult('result-all', allResults, 'success');
+        }
+
+        // 页面加载时的初始化
+        window.onload = function() {
+            console.log('🧪 API标准化验证测试工具已加载');
+            console.log('API基础地址:', API_BASE);
+        };
+    </script>
+</body>
+</html>

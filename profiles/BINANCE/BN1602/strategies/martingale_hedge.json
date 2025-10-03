@@ -44,6 +44,7 @@
       "max_drawdown": 0.08
     }
   },
+  "autoTrade": true,
   "risk_control": {
     "max_daily_loss": 100,
     "emergency_stop_loss": 0.1,
@@ -60,5 +61,12 @@
     "enable_logging": true,
     "enable_alerts": true,
     "log_level": "INFO"
-  }
+  },
+  "notifications": true,
+  "max_daily_loss": 100,
+  "emergency_stop_loss": 0.1,
+  "enable_logging": true,
+  "enable_performance_monitoring": false,
+  "enable_webhooks": false,
+  "enable_alerts": true
 }

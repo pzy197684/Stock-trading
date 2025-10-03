@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test</title>
+</head>
+<body>
+    <h1>API测试</h1>
+    <button onclick="testAPI()">测试API</button>
+    <div id="result"></div>
+
+    <script>
+    async function testAPI() {
+        try {
+            console.log('开始测试API...');
+            const response = await fetch('http://localhost:8001/api/running/instances');
+            console.log('Response:', response);
+            
+            const data = await response.json();
+            console.log('Data:', data);
+            
+            document.getElementById('result').innerHTML = `
+                <h2>API响应:</h2>
+                <pre>${JSON.stringify(data, null, 2)}</pre>
+            `;
+            
+            if (data.success && data.data && data.data.instances) {
+                console.log('成功获取到', data.data.instances.length, '个实例');
+            }
+        } catch (error) {
+            console.error('API测试失败:', error);
+            document.getElementById('result').innerHTML = `
+                <h2>错误:</h2>
+                <pre>${error.message}</pre>
+            `;
+        }
+    }
+    </script>
+</body>
+</html>

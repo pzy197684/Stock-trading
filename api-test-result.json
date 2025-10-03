@@ -1,0 +1,82 @@
+﻿{
+    "success":  true,
+    "data":  {
+                 "instances":  [
+                                   {
+                                       "id":  "martingale_hedge_4_1759465789",
+                                       "account":  "MARTINGALE_HEDGE_4_1759429169",
+                                       "platform":  "unknown",
+                                       "strategy":  "martingale_hedge",
+                                       "status":  "running",
+                                       "symbol":  "OP/USDT",
+                                       "profit":  0.0,
+                                       "profit_rate":  0.0,
+                                       "positions":  0,
+                                       "orders":  0,
+                                       "runtime":  0,
+                                       "last_signal":  null,
+                                       "created_at":  1759465789.3449504,
+                                       "pid":  null,
+                                       "owner":  "æ½æ­£å",
+                                       "tradingPair":  "OP/USDT"
+                                   },
+                                   {
+                                       "id":  "martingale_hedge_3_1759465789",
+                                       "account":  "MARTINGALE_HEDGE_3_1759427574",
+                                       "platform":  "unknown",
+                                       "strategy":  "martingale_hedge",
+                                       "status":  "running",
+                                       "symbol":  "OP/USDT",
+                                       "profit":  0.0,
+                                       "profit_rate":  0.0,
+                                       "positions":  0,
+                                       "orders":  0,
+                                       "runtime":  0,
+                                       "last_signal":  null,
+                                       "created_at":  1759465789.3399348,
+                                       "pid":  null,
+                                       "owner":  "æ½æ­£å",
+                                       "tradingPair":  "OP/USDT"
+                                   },
+                                   {
+                                       "id":  "martingale_hedge_2_1759465789",
+                                       "account":  "MARTINGALE_HEDGE_2_1759426321",
+                                       "platform":  "unknown",
+                                       "strategy":  "martingale_hedge",
+                                       "status":  "running",
+                                       "symbol":  "OP/USDT",
+                                       "profit":  0.0,
+                                       "profit_rate":  0.0,
+                                       "positions":  0,
+                                       "orders":  0,
+                                       "runtime":  0,
+                                       "last_signal":  null,
+                                       "created_at":  1759465789.334712,
+                                       "pid":  null,
+                                       "owner":  "æ½æ­£å",
+                                       "tradingPair":  "OP/USDT"
+                                   },
+                                   {
+                                       "id":  "martingale_hedge_1_1759465789",
+                                       "account":  "BN1602",
+                                       "platform":  "BINANCE",
+                                       "strategy":  "martingale_hedge",
+                                       "status":  "running",
+                                       "symbol":  "OP/USDT",
+                                       "profit":  0.0,
+                                       "profit_rate":  0.0,
+                                       "positions":  0,
+                                       "orders":  0,
+                                       "runtime":  0,
+                                       "last_signal":  null,
+                                       "created_at":  1759465789.327093,
+                                       "pid":  null,
+                                       "owner":  "æ½æ­£å",
+                                       "tradingPair":  "OP/USDT"
+                                   }
+                               ],
+                 "total":  4,
+                 "running":  4,
+                 "stopped":  0
+             }
+}

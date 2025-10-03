@@ -5,7 +5,7 @@ import hmac
 import hashlib
 import requests
 from core.platform.base import ExchangeIf, create_error_response, create_success_response
-from core.domain.enums import PositionField
+from core.domain.enums import Direction, PositionField, ResponseField
 from core.logger import logger
 
 _BASE_MAINNET = "https://fapi.binance.com"
@@ -165,6 +165,22 @@ class BinanceExchange(ExchangeIf):
             return {"long": long_p, "short": short_p}
         return {"long": {"qty": 0, "avg_price": 0}, "short": {"qty": 0, "avg_price": 0}}
 
+    def get_balance(self) -> dict:
+        """获取账户余额"""
+        account_info = self.get_account_info()
+        if account_info.get("error"):
+            return account_info  # 返回错误信息
+        
+        # 从账户信息中提取余额
+        if account_info.get("success") and account_info.get("data"):
+            data = account_info["data"]
+            return {
+                "balance": data.get("balance", 0),
+                "available_balance": data.get("available_balance", 0),
+            }
+        else:
+            return {"error": True, "reason": "Failed to get account info"}
+
     def place_order(self, order_req: dict) -> dict:
         """下单 - 实盘环境必须提供正确的API凭证"""
         if not self.api_key or not self.api_secret:
@@ -189,7 +205,21 @@ class BinanceExchange(ExchangeIf):
                     params["price"] = str(order_req.get("price"))
         if order_req.get("direction"):
             # convert direction to side if necessary
-            params.setdefault("side", order_req.get("direction"))
+            direction = order_req.get("direction")
+            params["side"] = direction
+            # 为双向持仓模式添加 positionSide 参数
+            if direction == "BUY":
+                params["positionSide"] = "LONG"
+            elif direction == "SELL":
+                params["positionSide"] = "SHORT"
+        elif order_req.get("side"):
+            side = order_req.get("side")
+            params["side"] = side
+            # 为双向持仓模式添加 positionSide 参数
+            if side == "BUY":
+                params["positionSide"] = "LONG"
+            elif side == "SELL":
+                params["positionSide"] = "SHORT"
         # default to post
         res = self._signed_post("/fapi/v1/order", params)
         if isinstance(res, dict):

@@ -151,10 +151,23 @@ export function CurrentRunning() {
   const { 
     runningInstances: apiInstances = [], 
     error: apiError,
-    fetchRunningInstances,
-    stopStrategy
+    fetchRunningInstances
   } = useApiData();
   const isLoading = false; // ApiContext处理loading状态
+  
+  // 添加调试日志
+  console.log('CurrentRunning组件渲染，apiInstances:', apiInstances);
+  console.log('apiInstances长度:', apiInstances?.length || 0);
+  console.log('apiError:', apiError);
+  
+  // 显示实例数量的窗口提醒
+  useEffect(() => {
+    if (apiInstances && apiInstances.length > 0) {
+      console.log(`数据加载成功：找到 ${apiInstances.length} 个实例`);
+    } else {
+      console.log('数据加载问题：没有找到实例数据');
+    }
+  }, [apiInstances]);
   
   // 添加类型断言，确保TypeScript知道数据结构
   const typedApiInstances = (apiInstances as any[]) || [];
@@ -178,6 +191,12 @@ export function CurrentRunning() {
   const [isCreating, setIsCreating] = useState(false);
   
   const { toast } = useToast();
+
+  // 初始化时获取数据
+  useEffect(() => {
+    console.log('CurrentRunning组件初始化，获取实例数据...');
+    fetchRunningInstances();
+  }, [fetchRunningInstances]);
 
   // 本地存储键名
   const CUSTOM_SYMBOLS_KEY = 'trading_custom_symbols_history';
@@ -418,17 +437,80 @@ export function CurrentRunning() {
         // 立即刷新数据显示
         fetchRunningInstances();
       } else {
-        throw new Error(result.error || result.data?.message || '创建失败');
+        // 显示API返回的具体错误信息
+        const errorMsg = result.error || result.data?.message || '创建失败';
+        throw new Error(errorMsg);
       }
     } catch (error: any) {
       console.error('创建实例失败:', error);
+      
+      // 提取有意义的错误消息
+      let errorMessage = "创建实例失败";
+      if (error.message && error.message !== '[object Object]') {
+        errorMessage = error.message;
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      }
+      
       toast({
         type: "error",
         title: "创建失败", 
-        description: error.message || '未知错误',
+        description: errorMessage,
       });
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  // 启动策略
+  const startStrategy = async (accountId: string, instanceId: string) => {
+    try {
+      const result = await apiService.startStrategy(accountId, instanceId);
+      
+      if (result.success && result.data?.success) {
+        toast({
+          type: "success",
+          title: "策略启动成功",
+          description: `实例 ${instanceId} 已开始运行`,
+        });
+        // 立即刷新数据显示
+        fetchRunningInstances();
+      } else {
+        throw new Error(result.message || result.data?.message || '启动失败');
+      }
+    } catch (error) {
+      console.error('启动策略失败:', error);
+      toast({
+        type: "error",
+        title: "策略启动失败",
+        description: (error as Error).message || '未知错误',
+      });
+    }
+  };
+
+  // 停止策略
+  const stopStrategy = async (accountId: string, instanceId: string) => {
+    try {
+      const result = await apiService.stopStrategy(accountId, instanceId);
+      
+      if (result.success && result.data?.success) {
+        toast({
+          type: "success",
+          title: "策略停止成功",
+          description: `实例 ${instanceId} 已停止运行`,
+        });
+        // 立即刷新数据显示
+        fetchRunningInstances();
+      } else {
+        throw new Error(result.message || result.data?.message || '停止失败');
+      }
+    } catch (error) {
+      console.error('停止策略失败:', error);
+      toast({
+        type: "error",
+        title: "策略停止失败",
+        description: (error as Error).message || '未知错误',
+      });
     }
   };
 
@@ -557,6 +639,9 @@ export function CurrentRunning() {
     },
   }));
 
+  console.log('转换后的instances:', instances);
+  console.log('instances长度:', instances.length);
+
   // 合并运行实例的拥有人和所有账号的拥有人信息
   const owners = [
     "all",
@@ -569,6 +654,10 @@ export function CurrentRunning() {
     selectedOwner === "all"
       ? instances
       : instances.filter((i) => i.owner === selectedOwner);
+
+  console.log('filteredInstances:', filteredInstances);
+  console.log('filteredInstances.length:', filteredInstances.length);
+  console.log('selectedOwner:', selectedOwner);
 
   const toggleExpanded = (instanceId: string) => {
     const newExpanded = new Set(expandedInstances);
@@ -704,32 +793,49 @@ export function CurrentRunning() {
 
   const handleDeleteInstance = async (instanceId: string) => {
     try {
-      // 对于API实例，调用停止策略API
+      // 对于API实例，调用删除实例API
       const instance = instances.find((i: any) => i.id === instanceId);
       if (instance && typedApiInstances.length > 0) {
         console.log('删除实例:', instanceId, '账号:', instance.account);
         
-        // 调用ApiContext的stopStrategy方法
-        await stopStrategy(instance.account, instanceId);
+        // 调用真实的删除API
+        const deleteResult = await apiService.deleteInstance(instance.account, instanceId);
         
-        // 删除成功后刷新数据
-        await fetchRunningInstances();
-        
-        // 关闭设置对话框
-        setSettingsInstance(null);
-        
-        toast({
-          type: "success",
-          title: "实例删除成功",
-          description: `实例 ${instanceId} 已成功停止并删除`,
-        });
+        if (deleteResult.success) {
+          // 删除成功后刷新数据
+          await fetchRunningInstances();
+          
+          // 关闭设置对话框
+          setSettingsInstance(null);
+          
+          toast({
+            type: "success",
+            title: "实例删除成功",
+            description: `实例 ${instanceId} 已成功删除`,
+          });
+        } else {
+          throw new Error(deleteResult.error || "删除失败");
+        }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('删除实例失败:', error);
+      
+      // 如果是包含错误编码的错误，显示中文说明
+      let errorMessage = `删除实例 ${instanceId} 时发生错误`;
+      if (error.response && error.response.detail) {
+        const detail = error.response.detail;
+        if (detail.message) {
+          errorMessage = detail.message;
+        }
+        if (detail.solution) {
+          errorMessage += `\n解决方案: ${detail.solution}`;
+        }
+      }
+      
       toast({
         type: "error",
         title: "删除失败",
-        description: `删除实例 ${instanceId} 时发生错误`,
+        description: errorMessage,
       });
     }
   };
@@ -875,20 +981,33 @@ export function CurrentRunning() {
           </Select>
         </div>
 
-        <Dialog
-          open={showCreateDialog}
-          onOpenChange={handleCreateDialogChange}
-        >
-          <DialogTrigger asChild>
-            {/* 添加新实例按钮 */}
-            <Button>
-              <Plus className="w-4 h-4 mr-2" />
-              <span className="hidden sm:inline">
-                添加新实例
-              </span>
-              <span className="sm:hidden">添加</span>
-            </Button>
-          </DialogTrigger>
+        <div className="flex items-center gap-2">
+          {/* 刷新数据按钮 */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              console.log('手动刷新数据...');
+              fetchRunningInstances();
+            }}
+          >
+            刷新
+          </Button>
+
+          <Dialog
+            open={showCreateDialog}
+            onOpenChange={handleCreateDialogChange}
+          >
+            <DialogTrigger asChild>
+              {/* 添加新实例按钮 */}
+              <Button>
+                <Plus className="w-4 h-4 mr-2" />
+                <span className="hidden sm:inline">
+                  添加新实例
+                </span>
+                <span className="sm:hidden">添加</span>
+              </Button>
+            </DialogTrigger>
           <DialogContent className="sm:max-w-md">
             <div className="sticky top-0 bg-[rgba(255,255,255,0)] z-10 border-b pb-4 mb-4">
               <DialogHeader className="bg-[rgba(255,255,255,0)]">
@@ -1093,7 +1212,8 @@ export function CurrentRunning() {
               </DialogFooter>
             </div>
           </DialogContent>
-        </Dialog>
+          </Dialog>
+        </div>
       </div>
 
       {/* Running Instances */}
@@ -1240,61 +1360,86 @@ export function CurrentRunning() {
 
                   {/* Action Buttons */}
                   <div className="flex gap-2 flex-wrap">
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() =>
-                            toast({
-                              type: "warning",
-                              title: "准备停止策略",
-                            })
-                          }
-                        >
-                          <Square className="w-3 h-3 md:w-4 md:h-4 mr-1" />
-                          停止策略
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>
-                            确认停止策略
-                          </AlertDialogTitle>
-                          <AlertDialogDescription>
-                            您确定要停止 {instance.account} 的{" "}
-                            {instance.strategy} 吗？
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>
-                            取消
-                          </AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={() =>
-                              toast({
-                                type: "success",
-                                title: "策略已停止",
-                              })
-                            }
+                    {/* 启动/停止策略按钮 - 根据状态动态显示 */}
+                    {instance.status === 'running' ? (
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
                           >
-                            确认停止
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
+                            <Square className="w-3 h-3 md:w-4 md:h-4 mr-1" />
+                            停止策略
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>
+                              确认停止策略
+                            </AlertDialogTitle>
+                            <AlertDialogDescription>
+                              您确定要停止 {instance.account} 的{" "}
+                              {getStrategyDisplayName(instance.strategy)} 吗？
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>
+                              取消
+                            </AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={async () => {
+                                await stopStrategy(instance.account, instance.id);
+                              }}
+                            >
+                              确认停止
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    ) : (
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="default"
+                            size="sm"
+                            className="bg-green-600 hover:bg-green-700"
+                          >
+                            <Target className="w-3 h-3 md:w-4 md:h-4 mr-1" />
+                            开始策略
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>
+                              确认启动策略
+                            </AlertDialogTitle>
+                            <AlertDialogDescription>
+                              您确定要启动 {instance.account} 的{" "}
+                              {getStrategyDisplayName(instance.strategy)} 吗？请确保参数配置正确。
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>
+                              取消
+                            </AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={async () => {
+                                await startStrategy(instance.account, instance.id);
+                              }}
+                              className="bg-green-600 hover:bg-green-700"
+                            >
+                              确认启动
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    )}
 
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button
                           variant="destructive"
                           size="sm"
-                          onClick={() =>
-                            toast({
-                              type: "error",
-                              title: "准备紧急平仓",
-                            })
-                          }
                         >
                           <AlertTriangle className="w-3 h-3 md:w-4 md:h-4 mr-1" />
                           <span className="hidden sm:inline">
@@ -1339,10 +1484,6 @@ export function CurrentRunning() {
                       size="sm"
                       onClick={() => {
                         setSettingsInstance(instance);
-                        toast({
-                          type: "info",
-                          title: "打开实例设置",
-                        });
                       }}
                     >
                       <Settings className="w-3 h-3 md:w-4 md:h-4 mr-1" />

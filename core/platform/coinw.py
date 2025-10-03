@@ -18,6 +18,7 @@ import requests
 
 from core.logger import logger
 from core.platform.base import ExchangeIf, create_error_response, create_success_response
+from core.domain.enums import Direction, PositionField, OrderSide
 
 # Try to import safe_request_json / is_ok from legacy modules if present
 try:
@@ -133,7 +134,7 @@ def get_price(instrument: str) -> float:
 def get_positions(api_key: str, secret: str, instrument: str) -> Dict[str, Any]:
     path = "/v1/perpum/positions"
     resp, data = _request(api_key, secret, "GET", path, params={"instrument": instrument})
-    long_pos, short_pos = {"qty": 0.0, "avg_price": 0.0, "id": None}, {"qty": 0.0, "avg_price": 0.0, "id": None}
+    long_pos, short_pos = {PositionField.QTY: 0.0, PositionField.AVG_PRICE: 0.0, "id": None}, {PositionField.QTY: 0.0, PositionField.AVG_PRICE: 0.0, "id": None}
     try:
         info = get_instrument_info(instrument)
         _lot_size = float(info.get("oneLotSize") or 0.01)
@@ -158,10 +159,10 @@ def get_positions(api_key: str, secret: str, instrument: str) -> Dict[str, Any]:
             qty_lots = float(it.get("currentPiece") or 0.0)
             qty = qty_lots * _lot_size
         avg = float(it.get("openPrice") or 0.0)
-        if side == "long":
-            long_pos.update({"qty": qty, "avg_price": avg, "id": pid})
-        elif side == "short":
-            short_pos.update({"qty": qty, "avg_price": avg, "id": pid})
+        if side == Direction.LONG:
+            long_pos.update({PositionField.QTY: qty, PositionField.AVG_PRICE: avg, "id": pid})
+        elif side == Direction.SHORT:
+            short_pos.update({PositionField.QTY: qty, PositionField.AVG_PRICE: avg, "id": pid})
     return {"_ok": True, "long": long_pos, "short": short_pos, "_raw": data}
 
 def get_order(api_key: str, secret: str, instrument: str, order_id: str = "", client_id: str = "") -> Dict[str, Any]:
@@ -258,7 +259,7 @@ def close_position(
             for side in ("long", "short"):
                 it = (pos.get(side) or {})
                 if str(it.get("id") or "") == str(position_id):
-                    qty_base_total = float(it.get("qty") or 0.0)
+                    qty_base_total = float(it.get(PositionField.QTY) or 0.0)
                     lots_total = (qty_base_total / lot_size) if lot_size > 0 else 0.0
                     break
             if lots_total > 0 and lot_size > 0:
@@ -346,8 +347,8 @@ class CoinWExchange(ExchangeIf):
     def place_order(self, order_req: dict) -> dict:
         # adapt dict-based order_req to module-level place_order signature
         inst = order_req.get("instrument") or to_instrument(order_req.get("symbol", ""))
-        direction = order_req.get("direction") or order_req.get("side") or "long"
-        qty = order_req.get("quantity") or order_req.get("qty") or order_req.get("quantity") or 0.0
+        direction = order_req.get("direction") or order_req.get("side") or Direction.LONG
+        qty = order_req.get("quantity") or order_req.get(PositionField.QTY) or order_req.get("quantity") or 0.0
         otype = order_req.get("type") or order_req.get("order_type") or "MARKET"
         client_id = order_req.get("thirdOrderId") or order_req.get("client_id") or ""
         price = order_req.get("price")

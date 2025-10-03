@@ -79,6 +79,33 @@ class MartingaleHedgeStrategy(StrategyBase):
         # 精度管理
         self.equal_eps = 0.01  # 对冲平衡容差，将从配置读取
         
+        # 初始化关键属性以避免AttributeError
+        self._initialize_basic_attributes()
+    
+    def _initialize_basic_attributes(self):
+        """初始化基本属性，避免在generate_signal中出现AttributeError"""
+        # 从直接配置或交易配置获取杠杆和模式参数
+        self.leverage = self.params.get('leverage', 1)  # 直接从params获取杠杆
+        self.trading_mode = self.params.get('mode', 'dual')  # 直接从params获取模式
+        
+        # 如果直接配置中没有，尝试从trading配置获取
+        if 'trading' in self.params:
+            trading_config = self.params['trading']
+            self.leverage = trading_config.get('leverage', self.leverage)
+            self.trading_mode = trading_config.get('mode', self.trading_mode)
+        
+        # 验证交易模式
+        if self.trading_mode not in ['dual', 'long_only', 'short_only']:
+            logger.log_warning(f"无效的交易模式 {self.trading_mode}，使用默认值 'dual'")
+            self.trading_mode = 'dual'
+        
+        # 从配置加载精度参数
+        hedge_config = self.params.get('hedge', {})
+        self.equal_eps = float(hedge_config.get('equal_eps', 0.01))
+        
+        # 记录配置信息
+        logger.log_info(f"马丁对冲策略配置 - 杠杆: {self.leverage}x, 模式: {self.trading_mode}")
+        
     def get_required_params(self) -> List[str]:
         """返回必需的参数列表"""
         return [
@@ -189,22 +216,7 @@ class MartingaleHedgeStrategy(StrategyBase):
     def initialize(self, context: StrategyContext) -> bool:
         """初始化策略"""
         try:
-            # 从配置加载精度参数
-            hedge_config = self.params.get('hedge', {})
-            self.equal_eps = float(hedge_config.get('equal_eps', 0.01))
-            
-            # 从交易配置获取杠杆和模式参数
-            trading_config = self.params.get('trading', {})
-            self.leverage = trading_config.get('leverage', 1)  # 默认1倍杠杆
-            self.trading_mode = trading_config.get('mode', 'dual')  # 默认双向模式
-            
-            # 验证交易模式
-            if self.trading_mode not in ['dual', 'long_only', 'short_only']:
-                logger.log_warning(f"无效的交易模式 {self.trading_mode}，使用默认值 'dual'")
-                self.trading_mode = 'dual'
-            
-            # 记录配置信息
-            logger.log_info(f"马丁对冲策略配置 - 杠杆: {self.leverage}x, 模式: {self.trading_mode}")
+            # 基本属性已在构造函数中初始化，这里只处理需要context的部分
             
             # 设置杠杆倍数（如果不是默认值）
             if self.leverage > 1 and hasattr(context, 'exchange') and context.exchange:

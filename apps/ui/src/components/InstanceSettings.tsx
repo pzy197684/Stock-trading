@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Switch } from "./ui/switch";
 import { Separator } from "./ui/separator";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "./ui/alert-dialog";
+import { useToast } from "./ui/toast";
 import { Save, RotateCcw, RefreshCw, Trash2, LayoutTemplate } from "lucide-react";
 import apiService from "../services/apiService";
 
@@ -138,15 +139,17 @@ export function InstanceSettings({
   onParametersChange,
   onDeleteInstance
 }: InstanceSettingsProps) {
+  const { toast } = useToast();
   const [parameters, setParameters] = useState<InstanceParameters>(() => {
     try {
       const currentParams = (currentParameters && typeof currentParameters === 'object' ? currentParameters : {}) as Partial<InstanceParameters>;
       
+      // 自动交易状态：优先使用已保存的设置，如果没有则默认关闭
       return {
         long: currentParams?.long || SAFE_DEFAULTS.parameters.long,
         short: currentParams?.short || SAFE_DEFAULTS.parameters.short,
         hedge: currentParams?.hedge || SAFE_DEFAULTS.parameters.hedge,
-        autoTrade: false, // 强制默认关闭自动交易
+        autoTrade: currentParams?.autoTrade ?? false, // 使用已保存的设置，默认关闭确保安全性
         notifications: currentParams?.notifications ?? true,
         advanced: {
           ...SAFE_DEFAULTS.advanced,
@@ -241,39 +244,6 @@ export function InstanceSettings({
     setTemplateToApply(null);
   };
 
-  // 简化的配置检查函数
-  const checkBasicConfig = async (params: InstanceParameters): Promise<boolean> => {
-    try {
-      // 基本非空检查
-      const hasSymbol = !!(params.advanced?.symbol);
-      const hasLeverage = !!(params.advanced?.leverage && params.advanced.leverage > 0);
-      const hasLong = !!(params.long && params.long.first_qty > 0);
-      const hasShort = !!(params.short && params.short.first_qty > 0);
-      const hasHedge = !!(params.hedge && params.hedge.trigger_loss > 0);
-      
-      return hasSymbol && hasLeverage && hasLong && hasShort && hasHedge;
-    } catch (error) {
-      console.error('配置检查失败:', error);
-      return false;
-    }
-  };
-
-  // 处理自动交易开关切换
-  const handleAutoTradeToggle = async (checked: boolean) => {
-    if (checked) {
-      // 开启自动交易时进行基础检查
-      const configValid = await checkBasicConfig(parameters);
-      if (configValid) {
-        setShowAutoTradeConfirm(true);
-      } else {
-        alert('配置不完整，请检查 交易对、杠杆倍数、多头参数、空头参数、对冲参数 是否设置正确！');
-      }
-    } else {
-      // 直接关闭自动交易
-      updateParameter('autoTrade', false);
-    }
-  };
-
   // 确认开启自动交易
   const confirmEnableAutoTrade = () => {
     updateParameter('autoTrade', true);
@@ -352,20 +322,154 @@ export function InstanceSettings({
     }
   };
 
-  // 保存功能 - 正确处理高级配置的展平
-  const saveCurrentTab = () => {
-    const finalParams = {
-      ...parameters,
-      // 展平高级配置到顶层，保持与后端配置文件结构一致
-      ...(parameters.advanced || {}),
-      enable_alerts: parameters.notifications
+  // 参数验证函数
+  const validateParameters = (): { isValid: boolean; errors: string[] } => {
+    const errors: string[] = [];
+    
+    // 验证多仓参数
+    if (!parameters.long.first_qty || parameters.long.first_qty <= 0) {
+      errors.push('多仓首次数量必须大于0');
+    }
+    if (!parameters.long.add_ratio || parameters.long.add_ratio <= 0) {
+      errors.push('多仓加仓倍数必须大于0');
+    }
+    if (!parameters.long.add_interval || parameters.long.add_interval <= 0) {
+      errors.push('多仓加仓间隔必须大于0');
+    }
+    if (parameters.long.max_add_times <= 0) {
+      errors.push('多仓最大加仓次数必须大于0');
+    }
+    if (!parameters.long.tp_first_order || parameters.long.tp_first_order <= 0) {
+      errors.push('多仓首单止盈必须大于0');
+    }
+    if (!parameters.long.tp_before_full || parameters.long.tp_before_full <= 0) {
+      errors.push('多仓加仓前止盈必须大于0');
+    }
+    if (!parameters.long.tp_after_full || parameters.long.tp_after_full <= 0) {
+      errors.push('多仓满仓后止盈必须大于0');
+    }
+    
+    // 验证空仓参数
+    if (!parameters.short.first_qty || parameters.short.first_qty <= 0) {
+      errors.push('空仓首次数量必须大于0');
+    }
+    if (!parameters.short.add_ratio || parameters.short.add_ratio <= 0) {
+      errors.push('空仓加仓倍数必须大于0');
+    }
+    if (!parameters.short.add_interval || parameters.short.add_interval <= 0) {
+      errors.push('空仓加仓间隔必须大于0');
+    }
+    if (parameters.short.max_add_times <= 0) {
+      errors.push('空仓最大加仓次数必须大于0');
+    }
+    if (!parameters.short.tp_first_order || parameters.short.tp_first_order <= 0) {
+      errors.push('空仓首单止盈必须大于0');
+    }
+    if (!parameters.short.tp_before_full || parameters.short.tp_before_full <= 0) {
+      errors.push('空仓加仓前止盈必须大于0');
+    }
+    if (!parameters.short.tp_after_full || parameters.short.tp_after_full <= 0) {
+      errors.push('空仓满仓后止盈必须大于0');
+    }
+    
+    // 验证对冲参数
+    if (!parameters.hedge.trigger_loss || parameters.hedge.trigger_loss <= 0) {
+      errors.push('对冲触发损失必须大于0');
+    }
+    if (!parameters.hedge.equal_eps || parameters.hedge.equal_eps <= 0) {
+      errors.push('对冲相等精度必须大于0');
+    }
+    if (parameters.hedge.min_wait_seconds <= 0) {
+      errors.push('对冲最小等待时间必须大于0');
+    }
+    if (!parameters.hedge.release_tp_after_full.long || parameters.hedge.release_tp_after_full.long <= 0) {
+      errors.push('对冲多仓释放止盈必须大于0');
+    }
+    if (!parameters.hedge.release_tp_after_full.short || parameters.hedge.release_tp_after_full.short <= 0) {
+      errors.push('对冲空仓释放止盈必须大于0');
+    }
+    if (!parameters.hedge.release_sl_loss_ratio.long || parameters.hedge.release_sl_loss_ratio.long <= 0) {
+      errors.push('对冲多仓止损比例必须大于0');
+    }
+    if (!parameters.hedge.release_sl_loss_ratio.short || parameters.hedge.release_sl_loss_ratio.short <= 0) {
+      errors.push('对冲空仓止损比例必须大于0');
+    }
+    
+    // 验证高级参数（如果存在）
+    if (parameters.advanced) {
+      if (parameters.advanced.leverage && parameters.advanced.leverage <= 0) {
+        errors.push('杠杆倍数必须大于0');
+      }
+      if (parameters.advanced.interval && parameters.advanced.interval <= 0) {
+        errors.push('执行间隔必须大于0');
+      }
+      if (parameters.advanced.max_daily_loss && parameters.advanced.max_daily_loss <= 0) {
+        errors.push('每日最大损失必须大于0');
+      }
+      if (parameters.advanced.emergency_stop_loss && parameters.advanced.emergency_stop_loss <= 0) {
+        errors.push('紧急止损比例必须大于0');
+      }
+    }
+    
+    return {
+      isValid: errors.length === 0,
+      errors
     };
-    
-    // 移除嵌套的 advanced 对象，避免重复
-    delete finalParams.advanced;
-    
-    onParametersChange(finalParams);
-    onOpenChange(false);
+  };
+
+  // 保存功能 - 添加参数验证
+  const saveCurrentTab = async () => {
+    try {
+      // 参数验证
+      const validation = validateParameters();
+      if (!validation.isValid) {
+        const errorMessage = validation.errors.join('\n• ');
+        toast({
+          title: "参数验证失败",
+          description: `请修正以下错误：\n• ${errorMessage}`,
+          type: "error"
+        });
+        return;
+      }
+
+      const finalParams = {
+        ...parameters,
+        // 展平高级配置到顶层，保持与后端配置文件结构一致
+        ...(parameters.advanced || {}),
+        enable_alerts: parameters.notifications
+      };
+      
+      // 移除嵌套的 advanced 对象，避免重复
+      delete finalParams.advanced;
+      
+      console.log('🔄 保存参数:', finalParams);
+      
+      // 先保存到运行实例
+      if (instanceName) {
+        const updateResult = await apiService.updateInstanceParameters(instanceName, finalParams);
+        console.log('💾 实例参数更新结果:', updateResult);
+      }
+      
+      // 再保存到配置文件
+      const configResult = await apiService.updateProfileConfig(platform, instanceName, 'martingale_hedge', finalParams);
+      console.log('📁 配置文件更新结果:', configResult);
+      
+      onParametersChange(finalParams);
+      onOpenChange(false);
+      
+      toast({
+        title: "参数保存成功",
+        description: "所有参数已保存到配置文件",
+        type: "success"
+      });
+    } catch (error) {
+      console.error('❌ 保存参数失败:', error);
+      toast({
+        title: "参数保存失败", 
+        description: `保存过程中发生错误: ${error}`,
+        type: "error"
+      });
+    }
   };
 
   // 参数更新辅助函数
@@ -374,8 +478,11 @@ export function InstanceSettings({
       const newParams = { ...prev };
       const keys = path.split('.');
       
+      console.log(`🔧 更新参数: ${path} = ${value}`);
+      
       if (keys.length === 1) {
         (newParams as any)[keys[0]] = value;
+        console.log(`✅ 已设置 ${keys[0]} = ${value}`);
       } else if (keys.length === 2) {
         if (keys[0] === 'advanced') {
           newParams.advanced = { 
@@ -395,6 +502,13 @@ export function InstanceSettings({
             [field]: value
           }
         };
+      }
+      
+      console.log(`📝 参数更新后:`, newParams);
+      
+      // 立即调用回调函数通知父组件参数已更改
+      if (onParametersChange) {
+        onParametersChange(newParams);
       }
       
       return newParams;
@@ -683,7 +797,7 @@ export function InstanceSettings({
 
                   <Separator />
 
-                  {/* 消息通知和自动交易 */}
+                  {/* 消息通知 */}
                   <div className="space-y-4">
                     <div className="flex items-center justify-between p-4 border rounded-lg">
                       <div>
@@ -696,15 +810,15 @@ export function InstanceSettings({
                       />
                     </div>
 
-                    <div className="flex items-center justify-between p-4 border rounded-lg bg-amber-50 border-amber-200">
-                      <div>
-                        <Label className="text-amber-800">自动交易模式</Label>
-                        <p className="text-sm text-amber-600">启用后系统将自动执行交易（请谨慎开启）</p>
+                    {/* 提示信息：策略需要手动启动 */}
+                    <div className="p-4 border rounded-lg bg-blue-50 border-blue-200">
+                      <div className="flex items-center gap-2 text-blue-800">
+                        <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                        <Label className="text-blue-800">策略控制说明</Label>
                       </div>
-                      <Switch
-                        checked={parameters.autoTrade || false}
-                        onCheckedChange={handleAutoTradeToggle}
-                      />
+                      <p className="text-sm text-blue-600 mt-1">
+                        创建实例后，需要在实例卡片中点击"开始策略"按钮才会开始交易。请在调整好参数后再启动策略。
+                      </p>
                     </div>
                   </div>
                 </div>

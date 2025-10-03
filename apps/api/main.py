@@ -10,6 +10,8 @@ import os
 import asyncio
 import json
 import traceback
+import time
+import shutil
 from functools import wraps
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +28,7 @@ from core.logger import logger
 from core.websocket_logger import setup_websocket_logging
 from core.domain.enums import Platform, OrderStatus, PositionSide
 from core.domain.models import AccountState, PositionState
+from core.utils.error_codes import ErrorCodeManager, format_error, duplicate_instance_error, parameters_incomplete_error, instance_not_found_error
 
 # 错误处理装饰器
 def handle_api_errors(func):
@@ -103,71 +106,243 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
         self.log_connections: List[WebSocket] = []  # 专门用于日志推送
+        self.max_connections = 50  # 限制最大连接数
+        self.connection_metadata = {}  # 存储连接元数据
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
+        if len(self.active_connections) >= self.max_connections:
+            # 移除最老的连接
+            oldest = self.active_connections.pop(0)
+            try:
+                await oldest.close()
+            except:
+                pass
         self.active_connections.append(websocket)
 
     async def connect_log(self, websocket: WebSocket):
-        """连接日志WebSocket"""
-        await websocket.accept()
-        self.log_connections.append(websocket)
-        logger.info(f"日志WebSocket客户端已连接，当前总数: {len(self.log_connections)}")
+        """连接日志WebSocket - 增强版本"""
+        try:
+            await websocket.accept()
+            
+            # 限制连接数，防止资源耗尽
+            if len(self.log_connections) >= self.max_connections:
+                oldest = self.log_connections.pop(0)
+                try:
+                    await oldest.close(code=1000, reason="连接数量达到上限")
+                except:
+                    pass
+                    
+            self.log_connections.append(websocket)
+            
+            # 记录连接元数据
+            client_info = {
+                "connect_time": datetime.now().isoformat(),
+                "ip": websocket.client.host if websocket.client else "unknown",
+                "last_heartbeat": datetime.now()
+            }
+            self.connection_metadata[id(websocket)] = client_info
+            
+            logger.info(f"日志WebSocket客户端已连接，当前总数: {len(self.log_connections)}")
+            
+        except Exception as e:
+            logger.error(f"WebSocket连接失败: {e}")
+            raise
 
     def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-        if websocket in self.log_connections:
-            self.log_connections.remove(websocket)
-            logger.info(f"日志WebSocket客户端已断开，当前总数: {len(self.log_connections)}")
+        """增强的断开连接处理"""
+        try:
+            if websocket in self.active_connections:
+                self.active_connections.remove(websocket)
+            if websocket in self.log_connections:
+                self.log_connections.remove(websocket)
+                logger.info(f"日志WebSocket客户端已断开，当前总数: {len(self.log_connections)}")
+                
+            # 清理元数据
+            conn_id = id(websocket)
+            if conn_id in self.connection_metadata:
+                del self.connection_metadata[conn_id]
+                
+        except Exception as e:
+            logger.error(f"断开连接时出错: {e}")
+
+    async def cleanup_stale_connections(self):
+        """清理过期连接"""
+        stale_connections = []
+        current_time = datetime.now()
+        
+        for websocket in self.log_connections:
+            conn_id = id(websocket)
+            if conn_id in self.connection_metadata:
+                last_heartbeat = self.connection_metadata[conn_id]["last_heartbeat"]
+                if (current_time - last_heartbeat).total_seconds() > 120:  # 2分钟无心跳
+                    stale_connections.append(websocket)
+        
+        for websocket in stale_connections:
+            try:
+                await websocket.close(code=1000, reason="连接超时")
+            except:
+                pass
+            self.disconnect(websocket)
+        
+        if stale_connections:
+            logger.info(f"清理了 {len(stale_connections)} 个过期连接")
 
     async def broadcast(self, message: dict):
+        """增强的广播功能"""
+        disconnected = []
         for connection in self.active_connections:
             try:
-                await connection.send_text(json.dumps(message))
+                await connection.send_text(json.dumps(message, ensure_ascii=False))
             except Exception as e:
                 logger.error(f"WebSocket广播消息失败: {e}")
-                pass
-
-    async def broadcast_log(self, log_entry: dict):
-        """广播日志消息"""
-        if not self.log_connections:
-            return
-            
-        message = {
-            "type": "log",
-            "data": log_entry
-        }
-        
-        disconnected = []
-        for connection in self.log_connections:
-            try:
-                await connection.send_text(json.dumps(message))
-            except Exception as e:
-                logger.error(f"发送日志消息失败: {e}")
                 disconnected.append(connection)
         
         # 清理断开的连接
         for conn in disconnected:
-            self.log_connections.remove(conn)
+            self.disconnect(conn)
+
+    async def broadcast_log(self, log_entry: dict):
+        """广播日志消息 - 增强版本"""
+        if not self.log_connections:
+            return  # 静默处理，避免控制台噪音
+            
+        # 确保消息编码正确
+        message = {
+            "type": "log",
+            "data": log_entry,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        disconnected = []
+        success_count = 0
+        
+        for connection in self.log_connections:
+            try:
+                # 使用ensure_ascii=False确保中文正确显示
+                json_message = json.dumps(message, ensure_ascii=False)
+                await connection.send_text(json_message)
+                success_count += 1
+                
+                # 更新心跳时间
+                conn_id = id(connection)
+                if conn_id in self.connection_metadata:
+                    self.connection_metadata[conn_id]["last_heartbeat"] = datetime.now()
+                    
+            except Exception as e:
+                logger.debug(f"WebSocket发送失败，将断开连接: {e}")
+                disconnected.append(connection)
+        
+        # 清理断开的连接
+        for conn in disconnected:
+            self.disconnect(conn)
+            
+        # 只在有异常时记录日志
+        if disconnected:
+            logger.warning(f"清理了 {len(disconnected)} 个断开的WebSocket连接")
+
+    def get_connection_stats(self):
+        """获取连接统计信息"""
+        return {
+            "total_connections": len(self.log_connections),
+            "active_connections": len(self.active_connections),
+            "max_connections": self.max_connections,
+            "connection_details": [
+                {
+                    "id": conn_id,
+                    "connect_time": info["connect_time"],
+                    "ip": info["ip"],
+                    "last_heartbeat": info["last_heartbeat"].isoformat()
+                }
+                for conn_id, info in self.connection_metadata.items()
+            ]
+        }
 
 manager = ConnectionManager()
 
 # 设置WebSocket日志推送
 setup_websocket_logging(logger, manager.broadcast_log)
 
+# 全局工具函数
+def deep_merge(target, source):
+    """深度合并字典，保留target中source没有的键"""
+    for key, value in source.items():
+        if key in target and isinstance(target[key], dict) and isinstance(value, dict):
+            deep_merge(target[key], value)
+        else:
+            target[key] = value
+    return target
+
 # 应用生命周期事件
 @app.on_event("startup")
 async def startup_event():
     """应用启动事件"""
     logger.log_info("🚀 API服务器启动中...")
+    logger.log_info("📂 开始自动策略启动检查...")
+    
+    # 测试WebSocket日志系统
+    print("[系统启动] 初始化WebSocket日志系统...")
+    logger.log_info("🔌 WebSocket日志系统已初始化")
+    logger.log_info("📡 等待前端连接到 ws://localhost:8001/ws/logs")
+    
+    # 启动定期清理任务
+    asyncio.create_task(periodic_cleanup_task())
+    logger.log_info("🧹 WebSocket连接清理任务已启动")
+    
+    # 手动调用策略管理器的自动启动方法
+    try:
+        logger.log_info("🔄 调用策略管理器自动启动方法...")
+        strategy_manager._load_and_start_auto_strategies()
+        logger.log_info("✅ 策略自动启动检查完成")
+    except Exception as e:
+        logger.log_error(f"❌ 策略自动启动失败: {e}")
+        import traceback
+        logger.log_error(f"详细错误: {traceback.format_exc()}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """应用关闭事件"""
+    logger.log_info("🛑 API服务器正在关闭...")
+    
+    # 优雅关闭所有WebSocket连接
+    for websocket in manager.log_connections.copy():
+        try:
+            await websocket.close(code=1001, reason="服务器关闭")
+        except:
+            pass
+    
+    for websocket in manager.active_connections.copy():
+        try:
+            await websocket.close(code=1001, reason="服务器关闭")
+        except:
+            pass
+    
+    logger.log_info("✅ API服务器已关闭")
+
+async def periodic_cleanup_task():
+    """定期清理任务"""
+    while True:
+        try:
+            await asyncio.sleep(300)  # 每5分钟执行一次
+            await manager.cleanup_stale_connections()
+            
+            # 记录连接状态
+            if len(manager.log_connections) > 0:
+                logger.debug(f"WebSocket连接状态: {len(manager.log_connections)} 个活跃连接")
+                
+        except Exception as e:
+            logger.error(f"定期清理任务出错: {e}")
+            await asyncio.sleep(60)  # 出错后短暂等待再继续
     
     # 启动策略执行引擎
     try:
+        logger.log_info("🔄 启动策略执行引擎...")
         await strategy_engine.start()
         logger.log_info("✅ 策略执行引擎启动成功")
     except Exception as e:
         logger.log_error(f"❌ 策略执行引擎启动失败: {e}")
+        import traceback
+        logger.log_error(f"详细错误: {traceback.format_exc()}")
 
 @app.on_event("shutdown") 
 async def shutdown_event():
@@ -426,55 +601,123 @@ async def get_dashboard_summary():
             }
 
 @app.get("/api/running/instances")
+@handle_api_errors
 async def get_running_instances():
-    """获取当前运行的策略实例"""
+    """获取当前运行的策略实例 - 标准化响应格式"""
     try:
         instances = []
         
-        # 安全地获取活跃策略
+        # 获取所有策略实例
         try:
-            active_strategies = strategy_manager.get_active_strategies()
-            logger.log_info(f"Found {len(active_strategies)} active strategies")
+            all_strategies = []
+            # 遍历所有账号的策略实例
+            for account_instances in strategy_manager.strategy_instances.values():
+                for instance in account_instances.values():
+                    all_strategies.append(instance)
+            logger.log_info(f"Found {len(all_strategies)} total strategy instances")
         except Exception as e:
-            logger.log_error(f"Failed to get active strategies: {e}")
-            active_strategies = []
+            logger.log_error(f"Failed to get strategy instances: {e}")
+            all_strategies = []
         
-        for strategy_instance in active_strategies:
+        for strategy_instance in all_strategies:
             try:
-                # 获取策略参数
-                parameters = getattr(strategy_instance, 'parameters', {})
-                # 从参数中提取交易对信息
-                symbol = parameters.get('symbol', 'OP/USDT')
-                # 如果symbol不包含/，转换为标准格式
-                if symbol and 'USDT' in symbol and '/' not in symbol:
-                    symbol = symbol.replace('USDT', '/USDT')
-                
-                instances.append({
+                # 标准化数据格式
+                instance_data = {
                     "id": getattr(strategy_instance, 'instance_id', 'unknown'),
                     "account": getattr(strategy_instance, 'account', 'unknown'),
                     "platform": getattr(strategy_instance, 'platform', 'unknown'),
                     "strategy": getattr(strategy_instance, 'strategy_name', 'unknown'),
-                    "status": getattr(strategy_instance, 'status', 'unknown'),
-                    "profit": getattr(strategy_instance, 'total_profit', 0.0),
-                    "profit_rate": getattr(strategy_instance, 'profit_rate', 0.0),
+                    "status": normalize_status(strategy_instance),
+                    "symbol": normalize_symbol(strategy_instance),
+                    "profit": float(getattr(strategy_instance, 'total_profit', 0.0)),
+                    "profit_rate": float(getattr(strategy_instance, 'profit_rate', 0.0)),
                     "positions": len(getattr(strategy_instance, 'positions', [])),
                     "orders": len(getattr(strategy_instance, 'orders', [])),
-                    "runtime": getattr(strategy_instance, 'runtime_seconds', 0),
+                    "runtime": int(getattr(strategy_instance, 'runtime_seconds', 0)),
                     "last_signal": getattr(strategy_instance, 'last_signal_time', None),
-                    "symbol": symbol,  # 添加交易对信息
-                    "parameters": parameters,
-                    "owner": get_account_owner(getattr(strategy_instance, 'account', 'unknown'))  # 添加拥有人信息
-                })
+                    "created_at": getattr(strategy_instance, 'created_at', datetime.now().isoformat()),
+                    "pid": getattr(strategy_instance, 'pid', None),
+                    "owner": get_account_owner(getattr(strategy_instance, 'account', 'unknown'))
+                }
+                
+                # 兼容字段
+                instance_data["tradingPair"] = instance_data["symbol"]
+                
+                instances.append(instance_data)
+                
             except Exception as e:
                 logger.log_error(f"Error processing strategy instance: {e}")
                 continue
         
-        logger.log_info(f"Returning {len(instances)} strategy instances")
-        return {"instances": instances}
+        # 按创建时间排序
+        instances.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        
+        return {
+            "success": True,
+            "data": {
+                "instances": instances,
+                "total": len(instances),
+                "running": len([i for i in instances if i['status'] == 'running']),
+                "stopped": len([i for i in instances if i['status'] == 'stopped'])
+            }
+        }
+        
     except Exception as e:
         logger.log_error(f"获取运行实例失败: {e}")
-        add_missing_feature("running_instances", "运行策略实例状态获取功能需要完善")
-        return {"instances": []}
+        return {
+            "success": False,
+            "error": str(e),
+            "data": {
+                "instances": [],
+                "total": 0,
+                "running": 0,
+                "stopped": 0
+            }
+        }
+
+def normalize_status(strategy_instance) -> str:
+    """标准化策略状态"""
+    try:
+        if hasattr(strategy_instance, 'strategy') and hasattr(strategy_instance.strategy, 'status'):
+            status_value = strategy_instance.strategy.status
+            if hasattr(status_value, 'value'):
+                status = status_value.value.lower()
+            else:
+                status = str(status_value).lower()
+        elif hasattr(strategy_instance, 'status'):
+            status = str(getattr(strategy_instance, 'status', 'stopped')).lower()
+        else:
+            status = 'stopped'
+        
+        # 映射到标准状态
+        status_mapping = {
+            'active': 'running',
+            'inactive': 'stopped',
+            'running': 'running',
+            'stopped': 'stopped',
+            'error': 'error',
+            'starting': 'starting'
+        }
+        
+        return status_mapping.get(status, 'stopped')
+        
+    except Exception:
+        return 'stopped'
+
+def normalize_symbol(strategy_instance) -> str:
+    """标准化交易对格式"""
+    try:
+        parameters = getattr(strategy_instance, 'parameters', {})
+        symbol = parameters.get('symbol', 'OP/USDT')
+        
+        # 标准化格式
+        if symbol and 'USDT' in symbol and '/' not in symbol:
+            symbol = symbol.replace('USDT', '/USDT')
+        
+        return symbol
+        
+    except Exception:
+        return 'OP/USDT'
 
 @app.get("/api/running/instances/{instance_name}/parameters")
 async def get_instance_parameters(instance_name: str):
@@ -580,19 +823,15 @@ async def update_instance_parameters(instance_name: str, parameters: dict):
                 except Exception as e:
                     logger.log_warning(f"Failed to read existing config: {e}")
             
-            # 深度合并参数，保留原有参数的其他字段
-            def deep_merge(target, source):
-                """深度合并字典，保留target中source没有的键"""
-                for key, value in source.items():
-                    if key in target and isinstance(target[key], dict) and isinstance(value, dict):
-                        deep_merge(target[key], value)
-                    else:
-                        target[key] = value
-                return target
-            
+            # 深度合并参数，确保autoTrade等关键参数被正确保存
             logger.log_info(f"合并前的现有配置: {json.dumps(existing_config, indent=2, ensure_ascii=False)}")
             
-            # 更新配置中的参数部分，使用深度合并保留其他配置
+            # 特别处理autoTrade参数，确保它被正确保存
+            if 'autoTrade' in parameters:
+                existing_config['autoTrade'] = parameters['autoTrade']
+                logger.log_info(f"✅ 专门保存autoTrade参数: {parameters['autoTrade']}")
+            
+            # 深度合并其他参数
             deep_merge(existing_config, parameters)
             
             logger.log_info(f"合并后的最终配置: {json.dumps(existing_config, indent=2, ensure_ascii=False)}")
@@ -730,13 +969,7 @@ async def update_config_parameters(request_data: dict):
                 logger.log_warning(f"Failed to read existing config: {e}")
         
         # 使用深度合并更新配置
-        def deep_merge(target, source):
-            """深度合并两个字典"""
-            for key, value in source.items():
-                if key in target and isinstance(target[key], dict) and isinstance(value, dict):
-                    deep_merge(target[key], value)
-                else:
-                    target[key] = value
+        # 使用全局deep_merge函数
         
         deep_merge(existing_config, parameters)
         
@@ -1154,11 +1387,19 @@ async def test_account_connection_impl(account_id: str, platform_filter: str = N
                     }
                 
             except Exception as conn_e:
+                error_msg = str(conn_e)
+                logger.log_error(f"平台连接测试失败 - 平台: {platform_name}, 错误: {error_msg}")
                 return {
                     "success": False,
-                    "message": f"平台 {platform_name} 连接失败：{str(conn_e)}",
+                    "message": f"交易连接失败：{error_msg}。请检查API密钥配置和网络连接。",
                     "status": "connection_error",
-                    "platform": platform_name
+                    "platform": platform_name,
+                    "error_details": error_msg,
+                    "troubleshooting": [
+                        "检查API密钥是否正确",
+                        "确认网络连接正常",
+                        "验证平台服务是否可用"
+                    ]
                 }
                 
         except Exception as create_e:
@@ -1397,12 +1638,14 @@ async def create_instance(request: CreateInstanceRequest):
                         instance_strategy == request.strategy and
                         instance_symbol_normalized == request_symbol_normalized):
                         
-                        raise HTTPException(
-                            status_code=400, 
-                            detail=f"实例已存在：{request.platform}/{request.account_id}/{request.strategy} 交易对 {request.symbol} 的实例正在运行中，不允许重复创建"
+                        # 使用新的错误编码系统
+                        error_response = duplicate_instance_error(
+                            request.platform, request.account_id, request.strategy, request.symbol
                         )
-        except HTTPException:
-            raise  # 重新抛出HTTPException
+                        raise HTTPException(status_code=400, detail=error_response)
+        except HTTPException as http_exc:
+            # 重新抛出HTTPException（比如重复实例检查）
+            raise http_exc
         except Exception as e:
             logger.log_warning(f"检查重复实例时出错: {e}")
             # 继续执行，不因检查失败而阻止创建
@@ -1426,12 +1669,8 @@ async def create_instance(request: CreateInstanceRequest):
             # 不要覆盖parameters，因为策略管理器已经加载了完整的配置文件参数
             # strategy_instance.parameters = final_params  # 删除这行，保留从配置文件加载的参数
         
-        # 自动启动策略实例
-        start_success = strategy_manager.start_strategy(request.account_id, instance_id)
-        if start_success:
-            logger.log_info(f"🚀 Auto-started strategy instance: {request.account_id}/{instance_id}")
-        else:
-            logger.log_warning(f"⚠️ Failed to auto-start strategy instance: {request.account_id}/{instance_id}")
+        # 不再自动启动策略实例，需要用户手动启动
+        logger.log_info(f"✅ Created strategy instance: {request.account_id}/{instance_id} (manual start required)")
         
         # 广播更新
         await manager.broadcast({
@@ -1440,7 +1679,7 @@ async def create_instance(request: CreateInstanceRequest):
             "platform": request.platform,
             "strategy": request.strategy,
             "instance_id": instance_id,
-            "started": start_success,
+            "started": False,  # 不再自动启动
             "timestamp": datetime.now().isoformat()
         })
         
@@ -1448,14 +1687,22 @@ async def create_instance(request: CreateInstanceRequest):
         
         return {
             "success": True,
-            "message": f"实例 {request.strategy} 创建成功" + (" 并已启动" if start_success else " 但启动失败"),
+            "message": f"实例 {request.strategy} 创建成功，请在实例卡片中手动启动策略",
             "instance_id": instance_id,
             "account_id": request.account_id,
             "platform": request.platform,
             "strategy": request.strategy,
-            "started": start_success
+            "started": False  # 不再自动启动
         }
         
+    except HTTPException as http_exc:
+        # 重新抛出HTTPException（包括重复实例检查和其他业务逻辑错误）
+        raise http_exc
+    except ValueError as e:
+        # 处理重复实例等业务逻辑错误
+        error_msg = str(e)
+        logger.log_warning(f"⚠️ Business logic error: {error_msg}")
+        raise HTTPException(status_code=400, detail=error_msg)
     except Exception as e:
         logger.log_error(f"❌ Create instance failed: {e}")
         import traceback
@@ -1521,6 +1768,65 @@ async def stop_strategy(request: StopStrategyRequest):
         add_missing_feature("strategy_stop", "策略停止功能需要完善")
         raise HTTPException(status_code=500, detail=str(e))
 
+# 删除实例请求模型
+class DeleteInstanceRequest(BaseModel):
+    account_id: str
+    instance_id: str
+
+@app.post("/api/instances/delete")
+async def delete_instance(request: DeleteInstanceRequest):
+    """删除策略实例"""
+    try:
+        # 检查实例是否存在
+        strategy_instance = strategy_manager.get_strategy_instance(request.account_id, request.instance_id)
+        if not strategy_instance:
+            error_response = instance_not_found_error(request.account_id, request.instance_id)
+            raise HTTPException(status_code=404, detail=error_response)
+        
+        # 先停止策略（如果正在运行）
+        stop_success = strategy_manager.stop_strategy(request.account_id, request.instance_id)
+        if stop_success:
+            logger.log_info(f"已停止实例 {request.instance_id} 在账号 {request.account_id}")
+        
+        # 删除策略实例
+        delete_success = strategy_manager.delete_strategy_instance(request.account_id, request.instance_id)
+        
+        if delete_success:
+            # 广播更新
+            await manager.broadcast({
+                "type": "instance_deleted",
+                "account_id": request.account_id,
+                "instance_id": request.instance_id,
+                "timestamp": datetime.now().isoformat()
+            })
+            
+            logger.log_info(f"✅ Deleted instance {request.instance_id} for account {request.account_id}")
+            return {
+                "success": True,
+                "message": f"实例 {request.instance_id} 删除成功"
+            }
+        else:
+            error_response = format_error(
+                "DELETE_INSTANCE_FAILED",
+                f"删除实例 {request.instance_id} 失败",
+                account=request.account_id,
+                instance_id=request.instance_id
+            )
+            raise HTTPException(status_code=500, detail=error_response)
+            
+    except HTTPException as http_exc:
+        # 重新抛出HTTPException
+        raise http_exc
+    except Exception as e:
+        logger.log_error(f"删除实例失败: {e}")
+        error_response = format_error(
+            "DELETE_INSTANCE_FAILED",
+            f"删除实例时发生错误: {str(e)}",
+            account=request.account_id,
+            instance_id=request.instance_id
+        )
+        raise HTTPException(status_code=500, detail=error_response)
+
 @app.post("/api/strategy/force-stop-and-close")
 async def force_stop_and_close_strategy(request: ForceStopStrategyRequest):
     """紧急平仓并停止策略"""
@@ -1570,9 +1876,9 @@ async def get_recent_logs(
         
         logs = []
         
-        # Read from main runtime log
-        runtime_log_path = "d:/Desktop/Stock-trading/logs/runtime.log"
-        if os.path.exists(runtime_log_path):
+        # Read from main runtime log - 使用正确的项目根目录路径
+        runtime_log_path = project_root / "logs" / "runtime.log"
+        if runtime_log_path.exists():
             try:
                 with open(runtime_log_path, 'r', encoding='utf-8', errors='ignore') as f:
                     lines = f.readlines()[-limit*2:]  # Read more to filter
@@ -1582,8 +1888,16 @@ async def get_recent_logs(
                     if not line:
                         continue
                         
-                    # Parse log format: 2025-09-23 15:53:16,948 - INFO - message
-                    match = re.match(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ - (\w+) - (.+)', line)
+                    # Parse log format: 2025-10-03 01:37:40 - INFO - [logger.py:info:73] - message
+                    # 尝试多种日志格式
+                    match = None
+                    
+                    # 格式1：完整格式 with file info
+                    match = re.match(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:,\d+)? - (\w+) - \[.*?\] - (.+)', line)
+                    if not match:
+                        # 格式2：简单格式 without file info
+                        match = re.match(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:,\d+)? - (\w+) - (.+)', line)
+                    
                     if match:
                         timestamp_str, log_level, message = match.groups()
                         
@@ -1592,9 +1906,9 @@ async def get_recent_logs(
                             continue
                             
                         logs.append({
-                            "timestamp": timestamp_str.replace(',', '.'),
+                            "timestamp": timestamp_str,
                             "level": log_level.upper(),
-                            "message": message,
+                            "message": message.strip(),
                             "source": "system"
                         })
                         
@@ -1655,66 +1969,159 @@ async def get_recent_logs(
 
 @app.websocket("/ws/logs")
 async def websocket_logs(websocket: WebSocket):
-    """日志WebSocket端点"""
-    await manager.connect_log(websocket)
+    """日志WebSocket端点 - 增强稳定性版本"""
+    client_ip = websocket.client.host if websocket.client else "unknown"
+    logger.info(f"新的日志WebSocket连接请求来自: {client_ip}")
+    
     try:
+        await manager.connect_log(websocket)
+        logger.info(f"日志WebSocket客户端已连接: {client_ip}")
+        
         # 发送连接成功消息
-        await websocket.send_text(json.dumps({
+        welcome_message = {
             "type": "connection",
             "status": "connected",
             "message": "日志WebSocket连接成功",
-            "timestamp": datetime.now().isoformat()
-        }))
+            "timestamp": datetime.now().isoformat(),
+            "connection_id": client_ip,
+            "server_info": {
+                "api_version": "1.0.0",
+                "websocket_version": "enhanced",
+                "heartbeat_interval": 60
+            }
+        }
         
-        # 发送历史日志(最近100条)
-        try:
-            log_file = project_root / "logs" / "runtime.log"
-            if log_file.exists():
-                with open(log_file, 'r', encoding='utf-8') as f:
-                    lines = f.readlines()
-                    recent_logs = lines[-100:] if len(lines) > 100 else lines
-                    
-                for line in recent_logs:
-                    if line.strip():
-                        await websocket.send_text(json.dumps({
-                            "type": "log",
-                            "data": {
-                                "timestamp": datetime.now().isoformat(),
-                                "level": "info",
-                                "message": line.strip(),
-                                "source": "history",
-                                "category": "system"
-                            }
-                        }))
-        except Exception as e:
-            logger.error(f"发送历史日志失败: {e}")
+        await websocket.send_text(json.dumps(welcome_message, ensure_ascii=False))
         
-        # 保持连接活跃
+        # 发送初始测试消息
+        test_message = {
+            "type": "log",
+            "data": {
+                "timestamp": datetime.now().isoformat(),
+                "level": "INFO",
+                "message": f"✅ WebSocket日志连接已建立 (客户端: {client_ip})",
+                "source": "websocket_system",
+                "category": "connection"
+            }
+        }
+        await websocket.send_text(json.dumps(test_message, ensure_ascii=False))
+        
+        # 保持连接活跃 - 改进的心跳机制
+        heartbeat_interval = 60  # 增加到60秒
+        last_cleanup = datetime.now()
+        
         while True:
             try:
-                # 等待客户端消息(心跳包)
-                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
-                message = json.loads(data)
+                # 等待客户端消息，支持更长的超时
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=heartbeat_interval)
                 
-                if message.get("type") == "ping":
-                    await websocket.send_text(json.dumps({
-                        "type": "pong",
-                        "timestamp": datetime.now().isoformat()
-                    }))
+                try:
+                    message = json.loads(data)
+                    message_type = message.get("type", "unknown")
+                    
+                    if message_type == "ping":
+                        # 响应心跳
+                        pong_response = {
+                            "type": "pong",
+                            "timestamp": datetime.now().isoformat(),
+                            "server_time": datetime.now().isoformat()
+                        }
+                        await websocket.send_text(json.dumps(pong_response, ensure_ascii=False))
+                        
+                    elif message_type == "request_logs":
+                        # 客户端请求最近日志
+                        await send_recent_logs(websocket)
+                        
+                    # 更新心跳时间
+                    conn_id = id(websocket)
+                    if conn_id in manager.connection_metadata:
+                        manager.connection_metadata[conn_id]["last_heartbeat"] = datetime.now()
+                        
+                except json.JSONDecodeError:
+                    logger.warning(f"收到无效JSON消息: {data}")
                     
             except asyncio.TimeoutError:
-                # 发送心跳包
-                await websocket.send_text(json.dumps({
+                # 发送服务器端心跳
+                heartbeat_message = {
                     "type": "heartbeat",
-                    "timestamp": datetime.now().isoformat()
-                }))
+                    "timestamp": datetime.now().isoformat(),
+                    "connection_count": len(manager.log_connections),
+                    "server_status": "active"
+                }
+                
+                try:
+                    await websocket.send_text(json.dumps(heartbeat_message, ensure_ascii=False))
+                except Exception as e:
+                    logger.warning(f"发送心跳失败，连接可能已断开: {e}")
+                    break
+                    
+            # 定期清理过期连接
+            current_time = datetime.now()
+            if (current_time - last_cleanup).total_seconds() > 300:  # 每5分钟清理一次
+                await manager.cleanup_stale_connections()
+                last_cleanup = current_time
                 
     except WebSocketDisconnect:
-        logger.info("日志WebSocket客户端主动断开")
+        logger.info(f"日志WebSocket客户端主动断开: {client_ip}")
     except Exception as e:
-        logger.error(f"日志WebSocket错误: {e}")
+        logger.error(f"日志WebSocket连接错误 ({client_ip}): {e}")
+        import traceback
+        logger.debug(f"WebSocket错误详情: {traceback.format_exc()}")
     finally:
         manager.disconnect(websocket)
+        logger.info(f"日志WebSocket连接已清理: {client_ip}")
+
+async def send_recent_logs(websocket: WebSocket, count: int = 20):
+    """发送最近的日志到WebSocket客户端"""
+    try:
+        log_file = project_root / "logs" / "runtime.log"
+        if log_file.exists():
+            with open(log_file, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+                recent_logs = lines[-count:] if len(lines) > count else lines
+                
+            for i, line in enumerate(recent_logs):
+                if line.strip():
+                    log_message = {
+                        "type": "log",
+                        "data": {
+                            "timestamp": datetime.now().isoformat(),
+                            "level": "INFO",
+                            "message": line.strip(),
+                            "source": "history",
+                            "category": "system",
+                            "index": i + 1,
+                            "total": len(recent_logs)
+                        }
+                    }
+                    await websocket.send_text(json.dumps(log_message, ensure_ascii=False))
+                    
+            # 发送历史日志完成消息
+            complete_message = {
+                "type": "log",
+                "data": {
+                    "timestamp": datetime.now().isoformat(),
+                    "level": "INFO",
+                    "message": f"📜 历史日志加载完成 (共 {len(recent_logs)} 条)",
+                    "source": "websocket_system",
+                    "category": "system"
+                }
+            }
+            await websocket.send_text(json.dumps(complete_message, ensure_ascii=False))
+            
+    except Exception as e:
+        logger.error(f"发送历史日志失败: {e}")
+        error_message = {
+            "type": "log",
+            "data": {
+                "timestamp": datetime.now().isoformat(),
+                "level": "ERROR",
+                "message": f"⚠️ 无法加载历史日志: {e}",
+                "source": "websocket_system",
+                "category": "error"
+            }
+        }
+        await websocket.send_text(json.dumps(error_message, ensure_ascii=False))
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -1749,6 +2156,452 @@ async def test_logs():
     logger.trade("测试交易日志: BTCUSDT 买入订单已提交")
     
     return {"message": "测试日志已生成", "status": "success"}
+
+@app.get("/api/logs/websocket/status")
+async def websocket_status():
+    """获取WebSocket连接状态"""
+    try:
+        stats = manager.get_connection_stats()
+        return {
+            "status": "success",
+            "websocket_status": {
+                "total_log_connections": stats["total_connections"],
+                "total_active_connections": stats["active_connections"],
+                "max_connections": stats["max_connections"],
+                "server_status": "running",
+                "last_check": datetime.now().isoformat()
+            },
+            "connection_details": stats["connection_details"],
+            "health": {
+                "is_healthy": stats["total_connections"] < stats["max_connections"] * 0.9,
+                "capacity_usage": f"{(stats['total_connections'] / stats['max_connections']) * 100:.1f}%"
+            }
+        }
+    except Exception as e:
+        logger.error(f"获取WebSocket状态失败: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "websocket_status": {
+                "total_log_connections": 0,
+                "server_status": "error"
+            }
+        }
+
+@app.post("/api/logs/websocket/cleanup")
+async def cleanup_websocket_connections():
+    """手动清理WebSocket连接"""
+    try:
+        initial_count = len(manager.log_connections)
+        await manager.cleanup_stale_connections()
+        final_count = len(manager.log_connections)
+        cleaned = initial_count - final_count
+        
+        return {
+            "status": "success",
+            "message": f"WebSocket连接清理完成",
+            "cleaned_connections": cleaned,
+            "remaining_connections": final_count,
+            "initial_connections": initial_count
+        }
+    except Exception as e:
+        logger.error(f"清理WebSocket连接失败: {e}")
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+async def get_websocket_log_status():
+    """获取WebSocket日志连接状态"""
+    return {
+        "active_connections": len(manager.log_connections),
+        "total_connections": len(manager.active_connections),
+        "status": "connected" if len(manager.log_connections) > 0 else "disconnected",
+        "endpoint": "ws://localhost:8001/ws/logs",
+        "message": "WebSocket日志系统状态正常" if len(manager.log_connections) > 0 else "没有活跃的WebSocket日志连接"
+    }
+
+@app.post("/api/logs/websocket/test")
+async def test_websocket_logs():
+    """测试WebSocket日志推送"""
+    try:
+        # 直接触发日志推送
+        test_messages = [
+            "🧪 WebSocket日志测试 - 信息级别",
+            "⚠️ WebSocket日志测试 - 警告级别", 
+            "❌ WebSocket日志测试 - 错误级别",
+            "📈 WebSocket日志测试 - 交易级别"
+        ]
+        
+        for i, msg in enumerate(test_messages):
+            await manager.broadcast_log({
+                "timestamp": datetime.now().isoformat(),
+                "level": ["info", "warning", "error", "trade"][i],
+                "message": msg,
+                "source": "websocket_test",
+                "category": "test",
+                "test_sequence": i + 1
+            })
+        
+        return {
+            "success": True,
+            "message": f"已发送 {len(test_messages)} 条测试日志",
+            "active_connections": len(manager.log_connections),
+            "test_messages": test_messages
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "WebSocket日志测试失败"
+        }
+
+@app.post("/api/webhook/test")
+async def test_webhook_notification():
+    """测试Webhook通知功能"""
+    try:
+        logger.log_info("🔔 测试Webhook通知功能")
+        
+        # 模拟发送webhook通知
+        test_notification = {
+            "type": "test",
+            "message": "Webhook通知测试",
+            "timestamp": datetime.now().isoformat(),
+            "data": {
+                "test_id": "webhook_test_001",
+                "status": "success"
+            }
+        }
+        
+        # 广播测试通知
+        await manager.broadcast({
+            "type": "webhook_test",
+            "data": test_notification
+        })
+        
+        logger.log_info("✅ Webhook通知测试完成")
+        return {
+            "success": True,
+            "message": "Webhook通知功能测试完成",
+            "test_data": test_notification
+        }
+    except Exception as e:
+        logger.log_error(f"Webhook测试失败: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "Webhook通知功能测试失败"
+        }
+
+# ==================== 配置文件管理接口 ====================
+
+@app.get("/api/config/profiles")
+@handle_api_errors
+async def list_config_profiles():
+    """列出所有配置文件"""
+    try:
+        profiles = {}
+        
+        # 扫描profiles目录
+        profiles_dir = project_root / "profiles"
+        if profiles_dir.exists():
+            for platform_dir in profiles_dir.iterdir():
+                if platform_dir.is_dir() and not platform_dir.name.startswith('_'):
+                    platform_name = platform_dir.name
+                    profiles[platform_name] = {}
+                    
+                    for account_dir in platform_dir.iterdir():
+                        if account_dir.is_dir():
+                            account_name = account_dir.name
+                            profiles[platform_name][account_name] = {}
+                            
+                            # 列出该账户下的所有策略配置
+                            for config_file in account_dir.glob("*.json"):
+                                if config_file.name != "profile.json":
+                                    strategy_name = config_file.stem
+                                    profiles[platform_name][account_name][strategy_name] = {
+                                        "file_path": str(config_file),
+                                        "last_modified": config_file.stat().st_mtime,
+                                        "size": config_file.stat().st_size
+                                    }
+        
+        return {
+            "success": True,
+            "data": {
+                "profiles": profiles,
+                "total_platforms": len(profiles),
+                "total_accounts": sum(len(accounts) for accounts in profiles.values())
+            }
+        }
+        
+    except Exception as e:
+        logger.log_error(f"列出配置文件失败: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@app.get("/api/config/profiles/{platform}/{account}/{strategy}")
+@handle_api_errors
+async def get_config_profile(platform: str, account: str, strategy: str):
+    """获取特定的配置文件内容"""
+    try:
+        config_file = project_root / "profiles" / platform / account / f"{strategy}.json"
+        
+        if not config_file.exists():
+            return {
+                "success": False,
+                "error": f"配置文件不存在: {config_file}"
+            }
+        
+        with open(config_file, 'r', encoding='utf-8') as f:
+            config_data = json.load(f)
+        
+        return {
+            "success": True,
+            "data": {
+                "config": config_data,
+                "file_info": {
+                    "path": str(config_file),
+                    "last_modified": config_file.stat().st_mtime,
+                    "size": config_file.stat().st_size
+                }
+            }
+        }
+        
+    except Exception as e:
+        logger.log_error(f"获取配置文件失败: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@app.post("/api/config/profiles/{platform}/{account}/{strategy}")
+@handle_api_errors
+async def save_config_profile(platform: str, account: str, strategy: str, config_data: dict):
+    """保存配置文件"""
+    try:
+        config_dir = project_root / "profiles" / platform / account
+        config_dir.mkdir(parents=True, exist_ok=True)
+        
+        config_file = config_dir / f"{strategy}.json"
+        
+        # 备份现有文件
+        if config_file.exists():
+            backup_file = config_file.with_suffix(f".json.backup.{int(time.time())}")
+            shutil.copy2(config_file, backup_file)
+            logger.log_info(f"已备份配置文件到: {backup_file}")
+        
+        # 验证配置数据
+        validated_config = validate_config_data(config_data, strategy)
+        
+        # 保存新配置
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump(validated_config, f, indent=2, ensure_ascii=False)
+        
+        logger.log_info(f"配置文件已保存: {config_file}")
+        
+        # 广播配置更新事件
+        await manager.broadcast_log({
+            "timestamp": datetime.now().isoformat(),
+            "level": "info",
+            "message": f"配置文件已更新: {platform}/{account}/{strategy}",
+            "source": "ConfigAPI",
+            "category": "config_update",
+            "data": {
+                "platform": platform,
+                "account": account,
+                "strategy": strategy,
+                "file_path": str(config_file)
+            }
+        })
+        
+        return {
+            "success": True,
+            "data": {
+                "message": "配置文件保存成功",
+                "file_path": str(config_file)
+            }
+        }
+        
+    except Exception as e:
+        logger.log_error(f"保存配置文件失败: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@app.delete("/api/config/profiles/{platform}/{account}/{strategy}")
+@handle_api_errors
+async def delete_config_profile(platform: str, account: str, strategy: str):
+    """删除配置文件"""
+    try:
+        config_file = project_root / "profiles" / platform / account / f"{strategy}.json"
+        
+        if not config_file.exists():
+            return {
+                "success": False,
+                "error": "配置文件不存在"
+            }
+        
+        # 创建备份
+        backup_file = config_file.with_suffix(f".json.deleted.{int(time.time())}")
+        shutil.move(config_file, backup_file)
+        
+        logger.log_info(f"配置文件已删除，备份到: {backup_file}")
+        
+        return {
+            "success": True,
+            "data": {
+                "message": "配置文件删除成功",
+                "backup_path": str(backup_file)
+            }
+        }
+        
+    except Exception as e:
+        logger.log_error(f"删除配置文件失败: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+def validate_config_data(config_data: dict, strategy: str) -> dict:
+    """验证配置数据的有效性"""
+    validated = config_data.copy()
+    
+    # 基本验证
+    if not isinstance(validated, dict):
+        raise ValueError("配置数据必须是字典格式")
+    
+    # 策略特定验证
+    if strategy == "martingale_hedge":
+        required_fields = ["symbol", "base_amount", "price_step"]
+        for field in required_fields:
+            if field not in validated:
+                validated[field] = get_default_value(field)
+    
+    # 数据类型验证
+    if "base_amount" in validated:
+        try:
+            validated["base_amount"] = float(validated["base_amount"])
+        except (ValueError, TypeError):
+            validated["base_amount"] = 10.0
+    
+    if "price_step" in validated:
+        try:
+            validated["price_step"] = float(validated["price_step"])
+        except (ValueError, TypeError):
+            validated["price_step"] = 0.01
+    
+    return validated
+
+def get_default_value(field: str):
+    """获取字段的默认值"""
+    defaults = {
+        "symbol": "OP/USDT",
+        "base_amount": 10.0,
+        "price_step": 0.01,
+        "max_orders": 20,
+        "hedge_enabled": True
+    }
+    return defaults.get(field, None)
+
+# ==================== 日志文件读取接口 ====================
+
+@app.get("/api/logs/file")
+@handle_api_errors
+async def get_log_file(path: str = Query(..., description="日志文件路径")):
+    """读取本地日志文件"""
+    try:
+        # 安全检查，防止路径遍历攻击
+        if '..' in path or path.startswith('/'):
+            return {
+                "success": False,
+                "error": "非法的文件路径"
+            }
+        
+        # 支持的日志文件路径
+        allowed_paths = [
+            project_root / "logs",
+            Path("d:/Desktop/Stock-trading/old/logs")
+        ]
+        
+        log_file = None
+        for allowed_path in allowed_paths:
+            candidate = allowed_path / path
+            if candidate.exists() and candidate.is_file():
+                log_file = candidate
+                break
+        
+        if not log_file:
+            return {
+                "success": False,
+                "error": f"日志文件不存在: {path}"
+            }
+        
+        # 读取文件内容
+        logs = []
+        try:
+            if log_file.suffix == '.csv':
+                # CSV格式日志
+                with open(log_file, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                    for i, line in enumerate(lines[1:], 1):  # 跳过标题行
+                        parts = line.strip().split(',')
+                        if len(parts) >= 4:
+                            logs.append({
+                                "timestamp": parts[0] if len(parts) > 0 else "",
+                                "level": "trade",
+                                "message": f"交易记录 #{i}: {parts[3] if len(parts) > 3 else ''}",
+                                "source": "TradingLog",
+                                "data": {
+                                    "raw_line": line.strip(),
+                                    "parts": parts
+                                }
+                            })
+            else:
+                # 文本格式日志
+                with open(log_file, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                    for i, line in enumerate(lines):
+                        if line.strip():
+                            logs.append({
+                                "timestamp": datetime.now().isoformat(),
+                                "level": "info",
+                                "message": line.strip(),
+                                "source": "LogFile",
+                                "line": i + 1
+                            })
+        
+        except UnicodeDecodeError:
+            # 尝试其他编码
+            with open(log_file, 'r', encoding='gbk') as f:
+                content = f.read()
+                logs.append({
+                    "timestamp": datetime.now().isoformat(),
+                    "level": "info", 
+                    "message": f"日志文件内容 (GBK编码): {content[:1000]}...",
+                    "source": "LogFile"
+                })
+        
+        return {
+            "success": True,
+            "data": {
+                "logs": logs,
+                "total": len(logs),
+                "file_info": {
+                    "path": str(log_file),
+                    "size": log_file.stat().st_size,
+                    "last_modified": log_file.stat().st_mtime
+                }
+            }
+        }
+        
+    except Exception as e:
+        logger.log_error(f"读取日志文件失败: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 if __name__ == "__main__":
     import uvicorn

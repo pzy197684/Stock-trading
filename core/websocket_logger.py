@@ -37,15 +37,20 @@ class WebSocketLogHandler(logging.Handler):
                 "line": record.lineno
             }
             
-            # 异步发送到WebSocket
+            # 异步发送到WebSocket - 包装成完整的消息格式
+            websocket_message = {
+                "type": "log",
+                "data": log_entry
+            }
+            
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    loop.create_task(self.websocket_broadcast_func(log_entry))
+                    loop.create_task(self.websocket_broadcast_func(websocket_message))
                 else:
                     # 如果当前线程没有事件循环，创建一个临时的任务
                     asyncio.run_coroutine_threadsafe(
-                        self.websocket_broadcast_func(log_entry),
+                        self.websocket_broadcast_func(websocket_message),
                         loop
                     )
             except Exception:

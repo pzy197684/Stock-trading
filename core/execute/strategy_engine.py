@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 from core.managers.strategy_manager import get_strategy_manager, StrategyInstance
 from core.managers.platform_manager import get_platform_manager
-from core.domain.enums import Platform
+from core.domain.enums import Platform, Direction
 from core.strategy.base import StrategyContext, TradingSignal, SignalType, StrategyStatus
 from core.logger import logger
 
@@ -134,6 +134,12 @@ class StrategyEngine:
         """构建策略上下文"""
         try:
             strategy = instance.strategy
+            
+            # 确保params是字典
+            if not isinstance(strategy.params, dict):
+                logger.log_error(f"❌ Strategy.params is not a dict, it's {type(strategy.params)}: {strategy.params}")
+                return None
+            
             symbol = strategy.params.get('symbol')
             
             if not symbol:
@@ -147,20 +153,32 @@ class StrategyEngine:
                 return None
             
             # 获取或创建平台实例
-            platform = self.platform_manager.get_platform(platform_name, account)
-            if not platform:
-                logger.log_info(f"平台实例不存在，正在创建: {platform_name} - {account}")
-                try:
-                    platform = self.platform_manager.create_platform_for_account(account, platform_name)
-                    if not platform:
-                        logger.log_error(f"创建平台实例失败: {platform_name}/{account}")
+            platform = None
+            try:
+                platform = self.platform_manager.get_platform(platform_name, account)
+            except ValueError as e:
+                # 平台实例不存在，尝试创建
+                if "available but no instance" in str(e):
+                    logger.log_info(f"平台实例不存在，正在创建: {platform_name} - {account}")
+                    try:
+                        platform = self.platform_manager.create_platform_for_account(account, platform_name)
+                        if not platform:
+                            logger.log_error(f"创建平台实例失败: {platform_name}/{account}")
+                            return None
+                    except Exception as create_error:
+                        logger.log_error(f"创建平台实例失败: {platform_name}/{account} - {create_error}")
+                        logger.log_error(f"错误详情: {type(create_error).__name__}: {create_error}")
+                        import traceback
+                        logger.log_error(f"堆栈跟踪: {traceback.format_exc()}")
                         return None
-                except Exception as create_error:
-                    logger.log_error(f"创建平台实例失败: {platform_name}/{account} - {create_error}")
-                    logger.log_error(f"错误详情: {type(create_error).__name__}: {create_error}")
-                    import traceback
-                    logger.log_error(f"堆栈跟踪: {traceback.format_exc()}")
+                else:
+                    # 其他错误，重新抛出
+                    logger.log_error(f"获取平台实例失败: {platform_name}/{account} - {e}")
                     return None
+            
+            if not platform:
+                logger.log_error(f"无法获取或创建平台实例: {platform_name}/{account}")
+                return None
             
             # 获取当前价格
             price_result = await asyncio.to_thread(platform.get_market_price, symbol)
@@ -177,12 +195,10 @@ class StrategyEngine:
             position_long = {}
             position_short = {}
             
-            if positions:
-                for pos in positions:
-                    if pos.get('side') == 'long':
-                        position_long = pos
-                    elif pos.get('side') == 'short':
-                        position_short = pos
+            if positions and isinstance(positions, dict):
+                # binance get_positions 返回 {"long": {...}, "short": {...}} 格式
+                position_long = positions.get('long', {})
+                position_short = positions.get('short', {})
             
             # 获取账户余额
             balance = await asyncio.to_thread(platform.get_balance)
@@ -230,10 +246,10 @@ class StrategyEngine:
                 logger.log_warning(f"未支持的信号类型: {signal.signal_type}")
                 return
             
-            # 构建订单参数
+            # 构建订单参数 - 使用direction字段匹配place_order方法期望的格式
             order_params = {
                 "symbol": signal.symbol,
-                "side": side,
+                "direction": side,  # 使用direction而不是side
                 "type": "MARKET",  # 使用市价单
                 "quantity": signal.quantity,
             }
@@ -242,10 +258,19 @@ class StrategyEngine:
             
             # 执行下单 - 重点：这里会捕获真实的交易所错误
             try:
-                result = await asyncio.to_thread(platform.create_order, **order_params)
+                result = await asyncio.to_thread(platform.place_order, order_params)
                 
                 if result and result.get('status') == 'FILLED':
-                    logger.log_trade(f"✅ 订单执行成功: {account} {side} {signal.symbol} {signal.quantity} @ {result.get('price', 'N/A')}")
+                    logger.log_trade(
+                        action="EXECUTE",
+                        symbol=signal.symbol,
+                        side=side,
+                        quantity=signal.quantity,
+                        price=result.get('price', 0),
+                        order_id=result.get('orderId'),
+                        account=account,
+                        status="SUCCESS"
+                    )
                     logger.log_info(f"订单详情: {result}")
                 else:
                     logger.log_warning(f"⚠️ 订单状态异常: {result}")
@@ -256,20 +281,52 @@ class StrategyEngine:
                 
                 if any(keyword in error_msg for keyword in ['insufficient', '余额不足', 'balance', 'fund']):
                     logger.log_warning(f"💰 资金不足错误: {account} - {order_error}")
-                    logger.log_trade(f"资金不足: {account} 尝试 {side} {signal.symbol} {signal.quantity}，但余额不足")
+                    logger.log_trade(
+                        action="FAILED",
+                        symbol=signal.symbol,
+                        side=side,
+                        quantity=signal.quantity,
+                        price=0,
+                        account=account,
+                        error="INSUFFICIENT_BALANCE"
+                    )
                 elif 'margin' in error_msg:
                     logger.log_warning(f"🔒 保证金不足: {account} - {order_error}")
-                    logger.log_trade(f"保证金不足: {account} 尝试 {side} {signal.symbol} {signal.quantity}，保证金不足")
+                    logger.log_trade(
+                        action="FAILED",
+                        symbol=signal.symbol,
+                        side=side,
+                        quantity=signal.quantity,
+                        price=0,
+                        account=account,
+                        error="INSUFFICIENT_MARGIN"
+                    )
                 else:
                     logger.log_error(f"❌ 下单失败: {account} - {order_error}")
-                    logger.log_trade(f"下单失败: {account} {side} {signal.symbol} {signal.quantity} - {order_error}")
+                    logger.log_trade(
+                        action="FAILED",
+                        symbol=signal.symbol,
+                        side=side,
+                        quantity=signal.quantity,
+                        price=0,
+                        account=account,
+                        error=str(order_error)
+                    )
                 
                 # 继续执行，不中断策略
                 return
             
         except Exception as e:
             logger.log_error(f"执行交易信号失败: {e}")
-            logger.log_trade(f"交易信号执行异常: {account} - {e}")
+            logger.log_trade(
+                action="ERROR",
+                symbol=signal.symbol,
+                side="UNKNOWN",
+                quantity=0,
+                price=0,
+                account=account,
+                error=str(e)
+            )
     
     def _get_platform_for_account(self, account: str) -> Optional[str]:
         """根据账户名确定交易平台"""

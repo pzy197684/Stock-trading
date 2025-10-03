@@ -1,24 +1,19 @@
 // apps/ui/src/hooks/useApiData.ts
-// 数据管理Hook，统一管理API数据状态
+// 数据管理Hook，统一管理API数据状态 - 更新版本
 
 import { useState, useEffect, useCallback } from 'react';
-import { apiClient, DashboardSummary, StrategyInstance, Platform, Strategy, LogEntry } from '../services/apiClient';
-
-interface ApiDataState {
-  // 数据状态
-  dashboardSummary: DashboardSummary | null;
-  runningInstances: StrategyInstance[];
-  availablePlatforms: Platform[];
-  availableStrategies: Strategy[];
-  recentLogs: LogEntry[];
-  
-  // 加载状态
-  isLoading: boolean;
-  error: string | null;
-  
-  // WebSocket连接状态
-  isConnected: boolean;
-}
+import type { 
+  ApiDataState, 
+  UseApiDataReturn, 
+  TradingInstance, 
+  CreateInstanceRequest,
+  ApiResponse,
+  DashboardSummary,
+  PlatformInfo,
+  StrategyInfo,
+  LogEntry
+} from '../types/api';
+import apiService from '../services/apiService';
 
 interface MissingFeature {
   component: string;

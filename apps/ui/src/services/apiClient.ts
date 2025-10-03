@@ -99,7 +99,18 @@ class ApiClient {
     if (!response.ok) {
       throw new Error(`API Error: ${response.status} ${response.statusText}`);
     }
-    return response.json();
+    const data = await response.json();
+    console.log('API原始响应数据:', data);
+    
+    // 处理标准化的API响应格式
+    if (data.success && data.data) {
+      console.log('返回data.data:', data.data);
+      return data.data as T;
+    }
+    
+    // 如果不是标准格式，直接返回原始数据
+    console.log('返回原始数据:', data);
+    return data;
   }
 
   async post<T>(endpoint: string, data?: any): Promise<T> {
@@ -113,7 +124,15 @@ class ApiClient {
     if (!response.ok) {
       throw new Error(`API Error: ${response.status} ${response.statusText}`);
     }
-    return response.json();
+    const responseData = await response.json();
+    
+    // 处理标准化的API响应格式
+    if (responseData.success && responseData.data) {
+      return responseData.data as T;
+    }
+    
+    // 如果不是标准格式，直接返回原始数据
+    return responseData;
   }
 
   // 仪表板数据
@@ -153,6 +172,14 @@ class ApiClient {
   // 停止策略
   async stopStrategy(accountId: string, instanceId: string): Promise<{ success: boolean; message: string }> {
     return this.post('/api/strategy/stop', {
+      account_id: accountId,
+      instance_id: instanceId,
+    });
+  }
+
+  // 删除实例
+  async deleteInstance(accountId: string, instanceId: string): Promise<{ success: boolean; message: string }> {
+    return this.post('/api/instances/delete', {
       account_id: accountId,
       instance_id: instanceId,
     });

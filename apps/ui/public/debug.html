@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Debug</title>
+</head>
+<body>
+    <h1>API调试测试</h1>
+    <button onclick="runTest()">运行测试</button>
+    <div id="output"></div>
+
+    <script src="debug-api.js"></script>
+    <script>
+    async function runTest() {
+        const originalLog = console.log;
+        const output = document.getElementById('output');
+        output.innerHTML = '';
+        
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            output.innerHTML += args.join(' ') + '<br>';
+        };
+        
+        await testApiClient();
+        
+        console.log = originalLog;
+    }
+    
+    // 自动运行
+    window.onload = runTest;
+    </script>
+</body>
+</html>

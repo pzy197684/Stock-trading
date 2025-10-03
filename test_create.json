@@ -1,0 +1,9 @@
+{
+  "account_id": "BN1602",
+  "platform": "binance", 
+  "strategy": "martingale_hedge",
+  "symbol": "BTCUSDT",
+  "parameters": {
+    "autoTrade": false
+  }
+}

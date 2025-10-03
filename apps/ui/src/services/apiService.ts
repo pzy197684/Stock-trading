@@ -45,6 +45,9 @@ class ApiService {
     const timeoutId = setTimeout(() => controller.abort(), timeout);
 
     try {
+      // 添加请求开始日志
+      console.debug(`API请求开始: ${method} ${endpoint}`);
+      
       const response = await fetch(url, {
         method,
         headers: requestHeaders,
@@ -54,14 +57,42 @@ class ApiService {
 
       clearTimeout(timeoutId);
 
+      // 详细的响应处理
       if (!response.ok) {
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        
+        try {
+          const errorData = await response.json();
+          if (errorData.detail) {
+            // 检查是否是嵌套的错误对象
+            if (typeof errorData.detail === 'object' && errorData.detail.message) {
+              errorMessage = errorData.detail.message;
+              // 如果有解决方案，也包含在错误信息中
+              if (errorData.detail.solution) {
+                errorMessage += `\n建议: ${errorData.detail.solution}`;
+              }
+            } else if (typeof errorData.detail === 'string') {
+              errorMessage = errorData.detail;
+            }
+          } else if (errorData.message) {
+            errorMessage = errorData.message;
+          }
+        } catch {
+          // 无法解析响应体，使用状态码信息
+        }
+        
+        console.error(`API请求失败: ${method} ${endpoint} - ${errorMessage}`);
+        
         return {
           success: false,
-          error: `HTTP ${response.status}: ${response.statusText}`
+          error: errorMessage
         };
       }
 
       const data = await response.json();
+      
+      console.debug(`API请求成功: ${method} ${endpoint}`);
+      
       return {
         success: true,
         data
@@ -70,23 +101,63 @@ class ApiService {
     } catch (error) {
       clearTimeout(timeoutId);
       
+      let errorMessage = 'Network error';
+      
       if (error instanceof Error) {
-        return {
-          success: false,
-          error: error.message
-        };
+        if (error.name === 'AbortError') {
+          errorMessage = `请求超时 (${timeout}ms)`;
+        } else {
+          errorMessage = error.message;
+        }
       }
+      
+      console.error(`API请求异常: ${method} ${endpoint} - ${errorMessage}`);
       
       return {
         success: false,
-        error: 'Unknown error occurred'
+        error: errorMessage
       };
     }
   }
 
-  // 实例管理
+  // 增强的实例管理方法
   async getRunningInstances(): Promise<ApiResponse> {
-    return this.makeRequest('/api/running/instances');
+    try {
+      const response = await this.makeRequest('/api/running/instances');
+      
+      if (response.success && response.data) {
+        // 验证响应数据结构
+        if (!response.data.instances || !Array.isArray(response.data.instances)) {
+          throw new Error('API响应数据格式错误：缺少instances数组');
+        }
+        
+        // 验证每个实例的必要字段
+        const validInstances = response.data.instances.filter((instance: any) => {
+          return instance.id && instance.account && instance.platform;
+        });
+        
+        if (validInstances.length !== response.data.instances.length) {
+          console.warn(`过滤掉 ${response.data.instances.length - validInstances.length} 个无效实例`);
+        }
+        
+        return {
+          success: true,
+          data: {
+            ...response.data,
+            instances: validInstances
+          }
+        };
+      }
+      
+      return response;
+      
+    } catch (error) {
+      console.error('获取运行实例时发生错误:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : '获取运行实例失败'
+      };
+    }
   }
 
   async createInstance(instanceData: any): Promise<ApiResponse> {
@@ -180,6 +251,75 @@ class ApiService {
   async testLogs(): Promise<ApiResponse> {
     return this.makeRequest('/api/logs/test', {
       method: 'POST'
+    });
+  }
+
+  // 删除策略实例
+  async deleteInstance(accountId: string, instanceId: string): Promise<ApiResponse> {
+    return this.makeRequest('/api/instances/delete', {
+      method: 'POST',
+      body: {
+        account_id: accountId,
+        instance_id: instanceId
+      }
+    });
+  }
+
+  // 启动策略
+  async startStrategy(accountId: string, instanceId: string): Promise<ApiResponse> {
+    return this.makeRequest('/api/strategy/start', {
+      method: 'POST',
+      body: {
+        account_id: accountId,
+        instance_id: instanceId
+      }
+    });
+  }
+
+  // 配置文件管理
+  async listConfigProfiles(): Promise<ApiResponse> {
+    return this.makeRequest('/api/config/profiles');
+  }
+
+  async getConfigProfile(platform: string, account: string, strategy: string): Promise<ApiResponse> {
+    return this.makeRequest(`/api/config/profiles/${platform}/${account}/${strategy}`);
+  }
+
+  async saveConfigProfile(platform: string, account: string, strategy: string, config: any): Promise<ApiResponse> {
+    return this.makeRequest(`/api/config/profiles/${platform}/${account}/${strategy}`, {
+      method: 'POST',
+      body: config
+    });
+  }
+
+  async deleteConfigProfile(platform: string, account: string, strategy: string): Promise<ApiResponse> {
+    return this.makeRequest(`/api/config/profiles/${platform}/${account}/${strategy}`, {
+      method: 'DELETE'
+    });
+  }
+
+  // 日志管理
+  async getRecentLogs(limit: number = 100, level?: string): Promise<ApiResponse> {
+    const params = new URLSearchParams();
+    params.append('limit', limit.toString());
+    if (level) {
+      params.append('level', level);
+    }
+    return this.makeRequest(`/api/logs/recent?${params.toString()}`);
+  }
+
+  async getLogFile(filePath: string): Promise<ApiResponse> {
+    return this.makeRequest(`/api/logs/file?path=${encodeURIComponent(filePath)}`);
+  }
+
+  // 停止策略
+  async stopStrategy(accountId: string, instanceId: string): Promise<ApiResponse> {
+    return this.makeRequest('/api/strategy/stop', {
+      method: 'POST',
+      body: {
+        account_id: accountId,
+        instance_id: instanceId
+      }
     });
   }
 }

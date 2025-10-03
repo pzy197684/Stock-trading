@@ -123,6 +123,9 @@ class StrategyManager:
         
         # 加载策略插件
         self._load_strategy_plugins()
+        
+        # 扫描并启动配置为自动启动的策略
+        self._load_and_start_auto_strategies()
     
     def _load_strategy_plugins(self):
         """加载策略插件"""
@@ -131,6 +134,78 @@ class StrategyManager:
             logger.log_info(f"📋 Loaded {len(plugins)} strategy plugins: {list(plugins.keys())}")
         except Exception as e:
             logger.log_error(f"❌ Failed to load strategy plugins: {e}")
+    
+    def _load_and_start_auto_strategies(self):
+        """扫描并启动配置为自动启动的策略"""
+        try:
+            import os
+            from pathlib import Path
+            import json
+            
+            profiles_dir = Path("profiles")
+            if not profiles_dir.exists():
+                logger.log_warning("Profiles directory not found")
+                return
+                
+            auto_started_count = 0
+            
+            # 扫描所有平台和账户
+            for platform_dir in profiles_dir.iterdir():
+                if not platform_dir.is_dir() or platform_dir.name.startswith('_'):
+                    continue
+                    
+                for account_dir in platform_dir.iterdir():
+                    if not account_dir.is_dir():
+                        continue
+                        
+                    strategies_dir = account_dir / "strategies"
+                    if not strategies_dir.exists():
+                        continue
+                        
+                    # 扫描策略配置文件
+                    for strategy_file in strategies_dir.glob("*.json"):
+                        try:
+                            with open(strategy_file, 'r', encoding='utf-8-sig') as f:
+                                strategy_config = json.load(f)
+                            
+                            # 检查是否需要手动启动
+                            # 支持根级别或safety部分的require_manual_start配置
+                            require_manual_start = strategy_config.get('require_manual_start', True)
+                            if 'safety' in strategy_config and 'require_manual_start' in strategy_config['safety']:
+                                require_manual_start = strategy_config['safety']['require_manual_start']
+                            
+                            if not require_manual_start:
+                                # 自动启动策略
+                                account_name = account_dir.name
+                                strategy_name = strategy_file.stem
+                                
+                                logger.log_info(f"🚀 Auto-starting strategy: {account_name}/{strategy_name}")
+                                
+                                # 创建策略实例
+                                instance_id = self.create_strategy_instance(
+                                    account=account_name,
+                                    strategy_name=strategy_name,
+                                    params=strategy_config
+                                )
+                                
+                                if instance_id:
+                                    # 启动策略
+                                    success = self.start_strategy(account_name, instance_id)
+                                    if success:
+                                        auto_started_count += 1
+                                        logger.log_info(f"✅ Auto-started: {account_name}/{strategy_name} -> {instance_id}")
+                                    else:
+                                        logger.log_error(f"❌ Failed to start: {account_name}/{strategy_name}")
+                                else:
+                                    logger.log_error(f"❌ Failed to create instance: {account_name}/{strategy_name}")
+                                    
+                        except Exception as e:
+                            logger.log_error(f"❌ Error loading strategy config {strategy_file}: {e}")
+            
+            logger.log_info(f"🎯 Auto-started {auto_started_count} strategies")
+            
+        except Exception as e:
+            logger.log_error(f"❌ Error in _load_and_start_auto_strategies: {e}")
     
     def _ensure_account_slot(self, account: str):
         """确保账号槽位存在"""
@@ -231,6 +306,13 @@ class StrategyManager:
         """将嵌套的策略配置展平为策略参数格式"""
         flattened = {}
         
+        # 直接复制根级别的配置参数（BN1602配置文件格式）
+        for key, value in config.items():
+            # 跳过内部配置键
+            if not key.startswith('_') and key not in ['metadata', 'plugin_config']:
+                flattened[key] = value
+        
+        # 如果存在嵌套的trading配置，也处理它（向后兼容）
         if 'trading' in config:
             trading = config['trading']
             # 基本交易参数
@@ -253,22 +335,6 @@ class StrategyManager:
             # 对冲参数
             if 'hedge' in trading:
                 flattened['hedge'] = trading['hedge']
-        
-        # 风险控制参数
-        if 'risk_control' in config:
-            flattened['risk_control'] = config['risk_control']
-        
-        # 执行参数
-        if 'execution' in config:
-            flattened['execution'] = config['execution']
-            
-        # 监控参数
-        if 'monitoring' in config:
-            flattened['monitoring'] = config['monitoring']
-            
-        # 安全参数
-        if 'safety' in config:
-            flattened['safety'] = config['safety']
         
         return flattened
     
@@ -320,6 +386,15 @@ class StrategyManager:
         if params:
             final_params.update(params)
         
+        # 检查重复实例：相同账号、策略、交易对的实例不允许重复创建
+        symbol = final_params.get('symbol')
+        if symbol:
+            existing_instances = self.strategy_instances.get(account, {})
+            for instance_id, instance in existing_instances.items():
+                if (instance.strategy_name == strategy_name and 
+                    instance.parameters.get('symbol') == symbol):
+                    raise ValueError(f"已存在相同配置的策略实例: {account}/{strategy_name}/{symbol} (实例ID: {instance_id})")
+        
         # 验证关键参数不能为null
         self._validate_strategy_params(final_params, strategy_name)
         
@@ -348,6 +423,22 @@ class StrategyManager:
             # 设置基本属性
             wrapper.strategy_name = strategy_name
             wrapper.parameters = final_params
+            
+            # 确定并设置平台
+            platform_map = {
+                'BN': 'BINANCE',
+                'CW': 'COINW', 
+                'OK': 'OKX',
+                'DC': 'DEEP'
+            }
+            
+            platform = 'unknown'
+            for prefix, platform_name in platform_map.items():
+                if account.startswith(prefix):
+                    platform = platform_name
+                    break
+            
+            wrapper.platform = platform
             
             # 应用实例配置
             if instance_config:
@@ -475,6 +566,10 @@ class StrategyManager:
             logger.log_error(f"❌ Failed to remove strategy instance {account}/{instance_id}: {e}")
             return False
     
+    def delete_strategy_instance(self, account: str, instance_id: str) -> bool:
+        """删除策略实例（别名方法）"""
+        return self.remove_strategy_instance(account, instance_id)
+
     def force_close_all_positions(self, account: str, instance_id: str) -> Dict[str, Any]:
         """
         紧急平仓并撤单 - 一键清空所有持仓和订单

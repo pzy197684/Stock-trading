@@ -89,8 +89,12 @@ class ConfigLoader:
             return (v or default)
         account = account or _get_env("ACCOUNT", "BN8891")
         base_dir = _get_env("ACCOUNTS_DIR", "accounts")
-        base_path = os.path.join(base_dir, account)
+        
+        # 修正路径结构：accounts/{EXCHANGE}/{account}/{exchange}_api.json
+        exchange_upper = exchange.upper()
+        base_path = os.path.join(base_dir, exchange_upper, account)
         key_path = os.path.join(base_path, f"{exchange}_api.json")
+        
         if not os.path.exists(key_path):
             logger.log_error(f"⚠️ API 配置文件不存在：{key_path}")
             return None

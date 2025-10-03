@@ -72,8 +72,11 @@ export function ApiProvider({ children }: { children: React.ReactNode }) {
 
   const fetchRunningInstances = useCallback(async () => {
     try {
+      console.log('开始获取运行实例...');
       const result = await apiClient.getRunningInstances();
+      console.log('API返回的实例数据:', result);
       updateData({ runningInstances: result.instances });
+      console.log('实例数据已更新到状态, 数量:', result.instances?.length || 0);
     } catch (error) {
       console.error('获取运行实例失败:', error);
       recordMissingFeature('CurrentRunning', 'instances', '运行实例数据获取失败');
