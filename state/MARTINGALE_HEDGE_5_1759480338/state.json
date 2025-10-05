@@ -43,13 +43,13 @@
   "schema_hydrated": {},
   "backfill_done": {},
   "metadata": {
-    "created_at": "2025-10-03T03:33:33.736752+00:00",
-    "updated_at": "2025-10-05T12:37:24.662571+00:00",
+    "created_at": "2025-10-05T12:37:24.668146+00:00",
+    "updated_at": "2025-10-05T12:37:24.669824+00:00",
     "version": "2.0.0",
-    "account": "MARTINGALE_HEDGE_4_1759429169",
+    "account": "MARTINGALE_HEDGE_5_1759480338",
     "platform": "",
     "strategy": "martingale_hedge",
     "status": "initialized",
-    "strategy_instance": "martingale_hedge_5_1759667844"
+    "strategy_instance": "martingale_hedge_6_1759667844"
   }
 }
