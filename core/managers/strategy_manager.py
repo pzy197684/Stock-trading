@@ -136,76 +136,121 @@ class StrategyManager:
             logger.log_error(f"❌ Failed to load strategy plugins: {e}")
     
     def _load_and_start_auto_strategies(self):
-        """扫描并启动配置为自动启动的策略"""
+        """恢复上次运行的策略实例，而不是基于配置文件自动启动"""
         try:
             import os
             from pathlib import Path
             import json
             
-            profiles_dir = Path("profiles")
-            if not profiles_dir.exists():
-                logger.log_warning("Profiles directory not found")
+            # 检查是否存在运行实例状态记录
+            instance_state_file = Path("state/running_instances.json")
+            if not instance_state_file.exists():
+                logger.log_info("📝 No previous running instances found. System starts clean.")
+                return
+                
+            try:
+                with open(instance_state_file, 'r', encoding='utf-8-sig') as f:
+                    running_instances = json.load(f)
+            except Exception as e:
+                logger.log_error(f"Failed to load running instances state: {e}")
+                return
+                
+            if not running_instances:
+                logger.log_info("📝 Previous running instances list was empty. System starts clean.")
                 return
                 
             auto_started_count = 0
+            logger.log_info(f"🔄 Found {len(running_instances)} previous running instances. Attempting to restore...")
             
-            # 扫描所有平台和账户
-            for platform_dir in profiles_dir.iterdir():
-                if not platform_dir.is_dir() or platform_dir.name.startswith('_'):
-                    continue
+            for instance_info in running_instances:
+                try:
+                    account_name = instance_info.get('account')
+                    strategy_name = instance_info.get('strategy')
+                    instance_id = instance_info.get('instance_id')
+                    parameters = instance_info.get('parameters', {})
                     
-                for account_dir in platform_dir.iterdir():
-                    if not account_dir.is_dir():
+                    if not all([account_name, strategy_name, instance_id]):
+                        logger.log_warning(f"Incomplete instance info: {instance_info}")
                         continue
+                    
+                    logger.log_info(f"🔄 Restoring: {account_name}/{strategy_name} -> {instance_id}")
+                    
+                    # 尝试恢复策略实例
+                    restored_id = self.create_strategy_instance(
+                        account=account_name,
+                        strategy_name=strategy_name,
+                        params=parameters
+                    )
+                    
+                    if restored_id:
+                        # 启动策略
+                        success = self.start_strategy(account_name, restored_id)
+                        if success:
+                            auto_started_count += 1
+                            logger.log_info(f"✅ Restored: {account_name}/{strategy_name} -> {restored_id}")
+                        else:
+                            logger.log_error(f"❌ Failed to start restored: {account_name}/{strategy_name}")
+                    else:
+                        logger.log_error(f"❌ Failed to restore instance: {account_name}/{strategy_name}")
                         
-                    strategies_dir = account_dir / "strategies"
-                    if not strategies_dir.exists():
-                        continue
-                        
-                    # 扫描策略配置文件
-                    for strategy_file in strategies_dir.glob("*.json"):
-                        try:
-                            with open(strategy_file, 'r', encoding='utf-8-sig') as f:
-                                strategy_config = json.load(f)
-                            
-                            # 检查是否需要手动启动
-                            # 支持根级别或safety部分的require_manual_start配置
-                            require_manual_start = strategy_config.get('require_manual_start', True)
-                            if 'safety' in strategy_config and 'require_manual_start' in strategy_config['safety']:
-                                require_manual_start = strategy_config['safety']['require_manual_start']
-                            
-                            if not require_manual_start:
-                                # 自动启动策略
-                                account_name = account_dir.name
-                                strategy_name = strategy_file.stem
-                                
-                                logger.log_info(f"🚀 Auto-starting strategy: {account_name}/{strategy_name}")
-                                
-                                # 创建策略实例
-                                instance_id = self.create_strategy_instance(
-                                    account=account_name,
-                                    strategy_name=strategy_name,
-                                    params=strategy_config
-                                )
-                                
-                                if instance_id:
-                                    # 启动策略
-                                    success = self.start_strategy(account_name, instance_id)
-                                    if success:
-                                        auto_started_count += 1
-                                        logger.log_info(f"✅ Auto-started: {account_name}/{strategy_name} -> {instance_id}")
-                                    else:
-                                        logger.log_error(f"❌ Failed to start: {account_name}/{strategy_name}")
-                                else:
-                                    logger.log_error(f"❌ Failed to create instance: {account_name}/{strategy_name}")
-                                    
-                        except Exception as e:
-                            logger.log_error(f"❌ Error loading strategy config {strategy_file}: {e}")
+                except Exception as e:
+                    logger.log_error(f"❌ Error restoring instance {instance_info}: {e}")
             
-            logger.log_info(f"🎯 Auto-started {auto_started_count} strategies")
+            logger.log_info(f"🎯 Restored {auto_started_count} instances from previous session")
             
         except Exception as e:
             logger.log_error(f"❌ Error in _load_and_start_auto_strategies: {e}")
+    
+    def _save_running_instances_state(self):
+        """保存当前运行实例状态"""
+        try:
+            import os
+            import json
+            from pathlib import Path
+            
+            # 确保state目录存在
+            state_dir = Path("state")
+            state_dir.mkdir(exist_ok=True)
+            
+            running_instances = []
+            
+            # 收集当前所有运行实例信息
+            for account, instances in self.strategy_instances.items():
+                for instance_id, wrapper in instances.items():
+                    if hasattr(wrapper, 'strategy') and wrapper.strategy:
+                        # 检查策略是否真正在运行（不是暂停或停止状态）
+                        try:
+                            strategy_running = wrapper.strategy.is_running() if hasattr(wrapper.strategy, 'is_running') else True
+                            if strategy_running:
+                                running_instances.append({
+                                    'account': account,
+                                    'strategy': wrapper.strategy_name,
+                                    'instance_id': instance_id,
+                                    'parameters': getattr(wrapper, 'parameters', {}),
+                                    'platform': getattr(wrapper, 'platform', 'unknown'),
+                                    'created_at': getattr(wrapper, 'created_at', None)
+                                })
+                        except Exception as e:
+                            # 如果无法确定状态，保守地包含该实例
+                            logger.log_warning(f"Cannot determine running state for {account}/{instance_id}: {e}")
+                            running_instances.append({
+                                'account': account,
+                                'strategy': wrapper.strategy_name,
+                                'instance_id': instance_id,
+                                'parameters': getattr(wrapper, 'parameters', {}),
+                                'platform': getattr(wrapper, 'platform', 'unknown'),
+                                'created_at': getattr(wrapper, 'created_at', None)
+                            })
+            
+            # 保存到文件
+            instance_state_file = state_dir / "running_instances.json"
+            with open(instance_state_file, 'w', encoding='utf-8') as f:
+                json.dump(running_instances, f, indent=2, ensure_ascii=False)
+                
+            logger.log_info(f"💾 Saved {len(running_instances)} running instances state")
+            
+        except Exception as e:
+            logger.log_error(f"Failed to save running instances state: {e}")
     
     def _ensure_account_slot(self, account: str):
         """确保账号槽位存在"""
@@ -273,11 +318,13 @@ class StrategyManager:
         platform_map = {
             'BN': 'BINANCE',
             'CW': 'COINW', 
-            'OK': 'OKX',
+            'OKX': 'OKX',
             'DC': 'DEEP'
         }
         
         platform = None
+        
+        # 常规前缀匹配
         for prefix, platform_name in platform_map.items():
             if account.startswith(prefix):
                 platform = platform_name
@@ -428,11 +475,13 @@ class StrategyManager:
             platform_map = {
                 'BN': 'BINANCE',
                 'CW': 'COINW', 
-                'OK': 'OKX',
+                'OKX': 'OKX',
                 'DC': 'DEEP'
             }
             
             platform = 'unknown'
+            
+            # 常规前缀匹配
             for prefix, platform_name in platform_map.items():
                 if account.startswith(prefix):
                     platform = platform_name
@@ -504,6 +553,10 @@ class StrategyManager:
             # 记录启动时间
             instance.strategy._start_time = time.time()
             instance.strategy.start()
+            
+            # 保存运行实例状态
+            self._save_running_instances_state()
+            
             logger.log_info(f"▶️  Started strategy: {account}/{instance_id}")
             return True
         except Exception as e:
@@ -535,6 +588,10 @@ class StrategyManager:
         try:
             instance.strategy.stop()
             logger.log_info(f"⏹️  Stopped strategy: {account}/{instance_id}")
+            
+            # 保存运行实例状态
+            self._save_running_instances_state()
+            
             return True
         except Exception as e:
             logger.log_error(f"❌ Failed to stop strategy {account}/{instance_id}: {e}")
@@ -555,6 +612,9 @@ class StrategyManager:
                 
                 # 移除实例
                 del self.strategy_instances[account][instance_id]
+                
+                # 保存运行实例状态
+                self._save_running_instances_state()
                 
                 logger.log_info(f"🗑️  Removed strategy instance: {account}/{instance_id}")
                 return True
@@ -759,6 +819,30 @@ class StrategyManager:
             position_short={},
             balance={}
         )
+    
+    def cleanup(self):
+        """系统关闭时的清理工作"""
+        try:
+            logger.log_info("🔄 Performing strategy manager cleanup...")
+            
+            # 保存最终运行状态
+            self._save_running_instances_state()
+            
+            # 停止所有运行的策略
+            for account, instances in self.strategy_instances.items():
+                for instance_id, wrapper in instances.items():
+                    try:
+                        if hasattr(wrapper, 'strategy') and wrapper.strategy:
+                            wrapper.strategy.stop()
+                            context = self._create_dummy_context(account)
+                            wrapper.strategy.cleanup(context)
+                    except Exception as e:
+                        logger.log_error(f"Error cleaning up {account}/{instance_id}: {e}")
+            
+            logger.log_info("✅ Strategy manager cleanup completed")
+            
+        except Exception as e:
+            logger.log_error(f"❌ Error during strategy manager cleanup: {e}")
 
 # 全局策略管理器实例
 _strategy_manager = None

@@ -54,8 +54,22 @@ export function LogsPanel() {
           console.log('📨 收到WebSocket消息:', event.data);
           const message = JSON.parse(event.data);
           if (message.type === 'log' && message.data) {
-            console.log('📝 添加新日志:', message.data);
-            setLogs(prev => [...prev, message.data].slice(-1000)); // 保留最新1000条
+            const logData = message.data;
+            
+            // 过滤空日志和垃圾信息
+            if (!logData.message || 
+                logData.message.trim() === '' || 
+                logData.message === '-' ||
+                (logData.level === 'debug' && (
+                  logData.message.includes('API调用开始') ||
+                  logData.message.includes('API调用成功') ||
+                  logData.message.includes('WebSocket连接状态')
+                ))) {
+              return; // 跳过这些消息
+            }
+            
+            console.log('📝 添加新日志:', logData);
+            setLogs(prev => [...prev, logData].slice(-1000)); // 保留最新1000条
           }
         } catch (error) {
           console.error('❌ 解析日志消息失败:', error);
@@ -154,7 +168,24 @@ export function LogsPanel() {
 
   // 格式化时间戳
   const formatTimestamp = (timestamp: string) => {
-    return new Date(timestamp).toLocaleString('zh-CN');
+    try {
+      if (!timestamp) {
+        return new Date().toLocaleString('zh-CN');
+      }
+      
+      const date = new Date(timestamp);
+      
+      // 检查日期是否有效
+      if (isNaN(date.getTime())) {
+        console.warn('无效的时间戳:', timestamp);
+        return new Date().toLocaleString('zh-CN');
+      }
+      
+      return date.toLocaleString('zh-CN');
+    } catch (error) {
+      console.error('时间戳格式化错误:', error, timestamp);
+      return new Date().toLocaleString('zh-CN');
+    }
   };
 
   // 清空日志

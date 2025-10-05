@@ -1,4 +1,4 @@
-{
+﻿{
   "_comment": "CW1602 CoinW马丁对冲策略配置",
   "_derived_from": "profiles/_shared_defaults/strategies/martingale_hedge.defaults.json",
   

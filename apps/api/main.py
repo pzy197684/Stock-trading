@@ -1146,43 +1146,109 @@ async def get_available_accounts(platform: Optional[str] = None):
         logger.log_info(f"Platform filter: {platform}")
         
         accounts = []
-        
-        # 方法2：扫描新的profiles目录获取配置的账号
         import os
-        # 确保使用正确的profiles目录路径
-        profiles_dir = os.path.join(project_root, "profiles")
-        logger.log_info(f"Checking profiles directory: {profiles_dir}")
-        logger.log_info(f"Current working directory: {os.getcwd()}")
-        logger.log_info(f"Project root: {project_root}")
         
-        if os.path.exists(profiles_dir):
-            logger.log_info(f"New profiles directory exists, scanning...")
+        # 方法1：扫描accounts目录获取实际配置的账号
+        accounts_dir = os.path.join(project_root, "accounts")
+        logger.log_info(f"Checking accounts directory: {accounts_dir}")
+        
+        if os.path.exists(accounts_dir):
+            logger.log_info(f"Accounts directory exists, scanning...")
             # 扫描平台目录 (BINANCE, COINW, OKX, DEEP)
-            for platform_dir in os.listdir(profiles_dir):
-                if platform_dir.startswith('_'):  # 跳过 _shared_defaults
+            for platform_dir in os.listdir(accounts_dir):
+                if platform_dir.startswith('_'):  # 跳过隐藏目录
                     continue
-                platform_path = os.path.join(profiles_dir, platform_dir)
+                platform_path = os.path.join(accounts_dir, platform_dir)
                 if os.path.isdir(platform_path):
                     logger.log_info(f"Scanning platform: {platform_dir}")
                     # 扫描账号目录
                     for account in os.listdir(platform_path):
                         account_path = os.path.join(platform_path, account)
                         if os.path.isdir(account_path):
+                            logger.log_info(f"Checking account directory: {account_path}")
+                            
+                            # 查找API配置文件（支持多种命名格式）
+                            api_files = [
+                                f"{platform_dir.lower()}_api.json",  # 如 okx_api.json
+                                "api.json",
+                                "config.json"
+                            ]
+                            
+                            account_platform = platform_dir.upper()  # 使用目录名作为平台名
+                            api_config = None
+                            
+                            for api_file in api_files:
+                                api_file_path = os.path.join(account_path, api_file)
+                                if os.path.exists(api_file_path):
+                                    logger.log_info(f"Found API config file: {api_file_path}")
+                                    try:
+                                        with open(api_file_path, 'r', encoding='utf-8-sig') as f:
+                                            api_config = json.load(f)
+                                            break
+                                    except Exception as e:
+                                        logger.log_error(f"Failed to read API config {api_file_path}: {e}")
+                            
+                            # 如果找到了API配置文件，说明这是一个有效的账号
+                            if api_config is not None:
+                                logger.log_info(f"Found valid account {account} for platform {account_platform}")
+                                logger.log_info(f"Platform comparison: '{account_platform.lower()}' vs '{platform.lower() if platform else None}'")
+                                
+                                # 平台筛选 (不区分大小写)
+                                if platform is None or account_platform.lower() == platform.lower():
+                                    logger.log_info(f"Platform matches! Adding account {account}")
+                                    # 检查是否已在列表中
+                                    if not any(acc['id'] == account for acc in accounts):
+                                        # 获取拥有人信息
+                                        owner = api_config.get('owner', 'Unknown')
+                                        display_name = f"{account} ({owner})"
+                                        
+                                        accounts.append({
+                                            "id": account,
+                                            "name": display_name,
+                                            "platform": account_platform,
+                                            "status": "configured",
+                                            "balance": 0.0,
+                                            "last_active": None,
+                                            "owner": owner,
+                                            "config_found": True
+                                        })
+                                    else:
+                                        logger.log_info(f"Account {account} already in list, skipping")
+                                else:
+                                    logger.log_info(f"Platform mismatch for {account}: '{account_platform}' != '{platform}'")
+                            else:
+                                logger.log_info(f"No API config found for account {account}")
+                        else:
+                            logger.log_info(f"Not a directory: {account_path}")
+                else:
+                    logger.log_info(f"Not a platform directory: {platform_path}")
+        else:
+            logger.log_error(f"Accounts directory not found: {accounts_dir}")
+        
+        # 方法2：扫描profiles目录获取额外配置（向后兼容）
+        profiles_dir = os.path.join(project_root, "profiles")
+        logger.log_info(f"Checking profiles directory: {profiles_dir}")
+        
+        if os.path.exists(profiles_dir):
+            logger.log_info(f"Profiles directory exists, scanning for additional accounts...")
+            for platform_dir in os.listdir(profiles_dir):
+                if platform_dir.startswith('_'):  # 跳过 _shared_defaults
+                    continue
+                platform_path = os.path.join(profiles_dir, platform_dir)
+                if os.path.isdir(platform_path):
+                    for account in os.listdir(platform_path):
+                        account_path = os.path.join(platform_path, account)
+                        if os.path.isdir(account_path):
                             profile_file = os.path.join(account_path, 'profile.json')
-                            logger.log_info(f"Checking profile file: {profile_file}")
                             if os.path.exists(profile_file):
-                                logger.log_info(f"Profile file exists, reading...")
                                 try:
                                     with open(profile_file, 'r', encoding='utf-8') as f:
                                         profile = json.load(f)
-                                        account_platform = profile.get('profile_info', {}).get('platform', 'unknown')
-                                        logger.log_info(f"Loaded profile for {account}, platform: {account_platform}")
-                                        logger.log_info(f"Platform comparison: '{account_platform.lower()}' vs '{platform.lower() if platform else None}'")
+                                        account_platform = profile.get('profile_info', {}).get('platform', platform_dir.upper())
                                         
                                         # 平台筛选 (不区分大小写)
                                         if platform is None or account_platform.lower() == platform.lower():
-                                            logger.log_info(f"Platform matches! Adding account {account}")
-                                            # 检查是否已在列表中
+                                            # 检查是否已在列表中（避免重复）
                                             if not any(acc['id'] == account for acc in accounts):
                                                 accounts.append({
                                                     "id": account,
@@ -1193,20 +1259,8 @@ async def get_available_accounts(platform: Optional[str] = None):
                                                     "last_active": None,
                                                     "config": profile
                                                 })
-                                            else:
-                                                logger.log_info(f"Account {account} already in list, skipping")
-                                        else:
-                                            logger.log_info(f"Platform mismatch for {account}: '{account_platform}' != '{platform}'")
                                 except Exception as e:
                                     logger.log_error(f"Failed to read profile for account {account}: {e}")
-                            else:
-                                logger.log_info(f"Profile file not found: {profile_file}")
-                        else:
-                            logger.log_info(f"Not a directory: {account_path}")
-                else:
-                    logger.log_info(f"Not a platform directory: {platform_path}")
-        else:
-            logger.log_error(f"Profiles directory not found: {profiles_dir}")
         
         logger.log_info(f"Total accounts found: {len(accounts)}")
         for acc in accounts:
@@ -1275,75 +1329,161 @@ async def test_account_connection(account_id: str):
 async def test_account_connection_impl(account_id: str, platform_filter: str = None):
     """测试账号平台连接的实现"""
     try:
-        # 首先从新的profiles目录读取账号配置
-        profiles_dir = os.path.join(project_root, "profiles")
-        # 扫描平台目录找到账号
+        # 方法1：优先从accounts目录读取API配置
+        accounts_dir = os.path.join(project_root, "accounts")
         account_config_path = None
         found_platform = None
-        for platform_dir in os.listdir(profiles_dir):
-            if platform_dir.startswith('_'):
-                continue
-            if platform_filter and platform_dir.upper() != platform_filter.upper():
-                continue
-            platform_path = os.path.join(profiles_dir, platform_dir)
-            if os.path.isdir(platform_path):
-                account_path = os.path.join(platform_path, account_id)
-                if os.path.isdir(account_path):
-                    config_file = os.path.join(account_path, 'profile.json')
-                    if os.path.exists(config_file):
-                        account_config_path = config_file
-                        found_platform = platform_dir
-                        break
+        api_credentials = {}
+        api_key = None
+        api_secret = None
         
-        if not account_config_path:
+        logger.log_info(f"Testing connection for account: {account_id}, platform_filter: {platform_filter}")
+        
+        # 扫描accounts目录查找账号的API配置
+        if os.path.exists(accounts_dir):
+            for platform_dir in os.listdir(accounts_dir):
+                if platform_dir.startswith('_'):
+                    continue
+                if platform_filter and platform_dir.upper() != platform_filter.upper():
+                    continue
+                platform_path = os.path.join(accounts_dir, platform_dir)
+                if os.path.isdir(platform_path):
+                    account_path = os.path.join(platform_path, account_id)
+                    if os.path.isdir(account_path):
+                        logger.log_info(f"Found account directory: {account_path}")
+                        
+                        # 查找API配置文件
+                        api_files = [
+                            f"{platform_dir.lower()}_api.json",
+                            "api.json",
+                            "config.json"
+                        ]
+                        
+                        for api_file in api_files:
+                            api_file_path = os.path.join(account_path, api_file)
+                            if os.path.exists(api_file_path):
+                                logger.log_info(f"Found API config file: {api_file_path}")
+                                try:
+                                    with open(api_file_path, 'r', encoding='utf-8-sig') as f:
+                                        api_config = json.load(f)
+                                    
+                                    found_platform = platform_dir.upper()
+                                    api_credentials = api_config
+                                    
+                                    logger.log_info(f"Loaded API config structure for {account_id}")
+                                    logger.log_info(f"Top-level keys: {list(api_config.keys())}")
+                                    
+                                    # 支持多种字段名格式和嵌套结构
+                                    # 检查顶级字段
+                                    api_key = (api_config.get('api_key') or 
+                                              api_config.get('API_KEY') or
+                                              api_config.get('apiKey'))
+                                    api_secret = (api_config.get('secret_key') or 
+                                                 api_config.get('api_secret') or
+                                                 api_config.get('API_SECRET') or
+                                                 api_config.get('secretKey'))
+                                    
+                                    logger.log_info(f"Top-level API key found: {api_key is not None}")
+                                    logger.log_info(f"Top-level API secret found: {api_secret is not None}")
+                                    
+                                    # 如果顶级没找到，检查嵌套的 api_config 字段
+                                    if not api_key or not api_secret:
+                                        nested_config = api_config.get('api_config', {})
+                                        logger.log_info(f"Checking nested api_config: {nested_config is not None}")
+                                        if nested_config:
+                                            logger.log_info(f"Nested config keys: {list(nested_config.keys())}")
+                                            api_key = (nested_config.get('api_key') or 
+                                                      nested_config.get('API_KEY') or
+                                                      nested_config.get('apiKey'))
+                                            api_secret = (nested_config.get('api_secret') or 
+                                                         nested_config.get('secret_key') or
+                                                         nested_config.get('API_SECRET') or
+                                                         nested_config.get('secretKey'))
+                                            
+                                            logger.log_info(f"Nested API key: {api_key}")
+                                            logger.log_info(f"Nested API secret: {api_secret}")
+                                            
+                                            # 对于OKX，还需要检查passphrase
+                                            if platform_dir.upper() == 'OKX':
+                                                passphrase = nested_config.get('passphrase')
+                                                logger.log_info(f"OKX passphrase: {passphrase}")
+                                                if passphrase:
+                                                    api_credentials['passphrase'] = passphrase
+                                    
+                                    if api_key and api_secret:
+                                        logger.log_info(f"Successfully loaded API credentials for {account_id}")
+                                        break
+                                    else:
+                                        logger.log_info(f"API credentials incomplete for {account_id}")
+                                    
+                                except Exception as e:
+                                    logger.log_error(f"Failed to read API config {api_file_path}: {e}")
+                                    import traceback
+                                    logger.log_error(f"Traceback: {traceback.format_exc()}")
+                        
+                        if api_key and api_secret:
+                            break
+        
+        # 方法2：如果accounts目录中找不到，尝试从profiles目录读取（向后兼容）
+        if not api_key or not api_secret:
+            logger.log_info(f"API config not found in accounts directory, trying profiles directory")
+            profiles_dir = os.path.join(project_root, "profiles")
+            
+            if os.path.exists(profiles_dir):
+                for platform_dir in os.listdir(profiles_dir):
+                    if platform_dir.startswith('_'):
+                        continue
+                    if platform_filter and platform_dir.upper() != platform_filter.upper():
+                        continue
+                    platform_path = os.path.join(profiles_dir, platform_dir)
+                    if os.path.isdir(platform_path):
+                        account_path = os.path.join(platform_path, account_id)
+                        if os.path.isdir(account_path):
+                            config_file = os.path.join(account_path, 'profile.json')
+                            if os.path.exists(config_file):
+                                try:
+                                    with open(config_file, 'r', encoding='utf-8-sig') as f:
+                                        profile = json.load(f)
+                                    
+                                    config = profile.get('profile_info', {})
+                                    found_platform = config.get('platform', platform_dir.upper())
+                                    
+                                    # 方式1: 直接在profile.json中的exchange_config
+                                    if 'exchange_config' in profile and 'credentials' in profile['exchange_config']:
+                                        api_credentials = profile['exchange_config']['credentials']
+                                        api_key = api_credentials.get('api_key')
+                                        api_secret = api_credentials.get('secret_key')
+                                    
+                                    # 方式2: 通过api_config.path指向外部文件
+                                    elif 'api_config' in profile and 'path' in profile['api_config']:
+                                        api_config_path = os.path.join(project_root, profile['api_config']['path'])
+                                        if os.path.exists(api_config_path):
+                                            try:
+                                                with open(api_config_path, 'r', encoding='utf-8-sig') as f:
+                                                    api_config = json.load(f)
+                                                api_credentials = api_config
+                                                api_key = (api_config.get('api_key') or 
+                                                          api_config.get('API_KEY') or
+                                                          api_config.get('apiKey'))
+                                                api_secret = (api_config.get('secret_key') or 
+                                                             api_config.get('api_secret') or
+                                                             api_config.get('API_SECRET') or
+                                                             api_config.get('secretKey'))
+                                            except Exception as e:
+                                                logger.log_error(f"读取API配置文件失败: {e}")
+                                    
+                                    if api_key and api_secret:
+                                        break
+                                        
+                                except Exception as e:
+                                    logger.log_error(f"Failed to read profile config: {e}")
+        
+        if not found_platform:
             return {
                 "success": False,
                 "message": f"账号 {account_id} 配置文件不存在",
                 "status": "config_not_found"
             }
-        
-        # 读取账号配置
-        with open(account_config_path, 'r', encoding='utf-8') as f:
-            profile = json.load(f)
-        
-        config = profile.get('profile_info', {})
-        platform_name = config.get('platform')
-        if not platform_name:
-            return {
-                "success": False,
-                "message": "账号配置中未指定平台",
-                "status": "platform_not_specified"
-            }
-        
-        # 获取API密钥 - 支持两种配置方式
-        api_credentials = {}
-        api_key = None
-        api_secret = None
-        
-        # 方式1: 直接在profile.json中的exchange_config
-        if 'exchange_config' in profile and 'credentials' in profile['exchange_config']:
-            api_credentials = profile['exchange_config']['credentials']
-            api_key = api_credentials.get('api_key')
-            api_secret = api_credentials.get('secret_key')
-        
-        # 方式2: 通过api_config.path指向外部文件
-        elif 'api_config' in profile and 'path' in profile['api_config']:
-            api_config_path = os.path.join(project_root, profile['api_config']['path'])
-            if os.path.exists(api_config_path):
-                try:
-                    with open(api_config_path, 'r', encoding='utf-8') as f:
-                        api_config = json.load(f)
-                    api_credentials = api_config
-                    # 支持多种字段名格式
-                    api_key = (api_config.get('api_key') or 
-                              api_config.get('API_KEY') or
-                              api_config.get('apiKey'))
-                    api_secret = (api_config.get('secret_key') or 
-                                 api_config.get('api_secret') or
-                                 api_config.get('API_SECRET') or
-                                 api_config.get('secretKey'))
-                except Exception as e:
-                    logger.log_error(f"读取API配置文件失败: {e}")
         
         if not api_key or not api_secret:
             return {
@@ -1351,6 +1491,30 @@ async def test_account_connection_impl(account_id: str, platform_filter: str = N
                 "message": f"API密钥配置不完整 - 账号 {account_id}",
                 "status": "credentials_missing"
             }
+        
+        # 检查API密钥是否为占位符
+        placeholder_indicators = [
+            "YOUR_", "_HERE", "PLACEHOLDER", "EXAMPLE", "TEST_KEY"
+        ]
+        
+        is_placeholder_key = any(indicator in api_key.upper() for indicator in placeholder_indicators)
+        is_placeholder_secret = any(indicator in api_secret.upper() for indicator in placeholder_indicators)
+        
+        if is_placeholder_key or is_placeholder_secret:
+            return {
+                "success": False,
+                "message": f"账号 {account_id} 使用的是模板配置，请配置真实的API密钥",
+                "status": "placeholder_credentials",
+                "details": {
+                    "api_key_is_placeholder": is_placeholder_key,
+                    "api_secret_is_placeholder": is_placeholder_secret,
+                    "instruction": "请在配置文件中替换为真实的API密钥"
+                }
+            }
+        
+        # 设置平台名称
+        platform_name = found_platform
+        logger.log_info(f"Platform identified as: {platform_name}")
         
         # 尝试创建平台连接
         try:

@@ -382,7 +382,14 @@ export function SystemTest() {
                 )}
                 {test.timestamp && (
                   <div className="text-xs text-muted-foreground">
-                    {new Date(test.timestamp).toLocaleTimeString()}
+                    {(() => {
+                      try {
+                        const date = new Date(test.timestamp);
+                        return isNaN(date.getTime()) ? '时间无效' : date.toLocaleTimeString();
+                      } catch {
+                        return '时间无效';
+                      }
+                    })()}
                   </div>
                 )}
               </div>

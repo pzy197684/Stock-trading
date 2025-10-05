@@ -771,7 +771,7 @@ export function CurrentRunning() {
         // 从实例ID推断平台和账户信息
         const platform = instanceId.startsWith('BN') ? 'BINANCE' : 
                          instanceId.startsWith('CW') ? 'COINW' : 
-                         instanceId.startsWith('OK') ? 'OKX' : 'BINANCE';
+                         instanceId.startsWith('OKX') ? 'OKX' : 'BINANCE';
         const account = instanceId;
         const strategy = 'martingale_hedge'; // 默认策略
         

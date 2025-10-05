@@ -17,7 +17,7 @@ TRADE_LOG_FILE = os.path.join(LOG_DIR, "trade.log")
 class EnhancedLogger:
     def __init__(self, log_file=LOG_FILE):
         self.logger = logging.getLogger("stock_trading")
-        self.logger.setLevel(logging.DEBUG)
+        self.logger.setLevel(logging.INFO)  # 改为INFO级别，减少DEBUG噪音
         
         # 详细格式化器 - 包含文件名、函数名、行号
         detailed_formatter = logging.Formatter(
@@ -36,7 +36,7 @@ class EnhancedLogger:
             # 控制台处理器 - 支持中文输出
             console_handler = logging.StreamHandler(sys.stdout)
             console_handler.setFormatter(simple_formatter)
-            console_handler.setLevel(logging.INFO)
+            console_handler.setLevel(logging.WARNING)  # 控制台只显示WARNING及以上级别
             
             # 文件处理器 - 详细日志
             file_handler = logging.FileHandler(log_file, encoding="utf-8")

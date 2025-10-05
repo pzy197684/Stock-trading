@@ -1,0 +1,17 @@
+﻿{
+  "description": "OKX8891 测试策略配置",
+  "strategy": "martingale_hedge",
+  "symbol": "BTC/USDT",
+  "base_amount": 10,
+  "max_orders": 5,
+  "price_step": 0.005,
+  "volume_multiplier": 2.0,
+  "take_profit_rate": 0.01,
+  "leverage": 1,
+  "require_manual_start": false,
+  "safety": {
+    "max_drawdown": 0.3,
+    "max_daily_loss": 1000,
+    "require_manual_start": false
+  }
+}

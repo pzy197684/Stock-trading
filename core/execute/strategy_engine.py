@@ -334,7 +334,7 @@ class StrategyEngine:
             return 'binance'
         elif account.startswith('CW'):
             return 'coinw'
-        elif account.startswith('OK'):
+        elif account.startswith('OKX'):
             return 'okx'
         elif account.startswith('DC') or account.startswith('DEEP'):
             return 'coinw'  # DEEP使用COINW平台

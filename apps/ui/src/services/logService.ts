@@ -59,9 +59,27 @@ class LogService {
   }
 
   addLog(entry: LogEntry) {
+    // 过滤掉空消息或无意义的日志
+    if (!entry.message || entry.message.trim() === '' || entry.message === '-') {
+      console.debug('跳过空日志消息:', entry);
+      return;
+    }
+    
+    // 过滤掉过于频繁的debug信息
+    if (entry.level === 'debug' && (
+      entry.message.includes('API调用开始') ||
+      entry.message.includes('API调用成功') ||
+      entry.message.includes('WebSocket连接状态')
+    )) {
+      return;
+    }
+
     const newEntry = {
       ...entry,
-      timestamp: entry.timestamp || new Date().toISOString()
+      timestamp: entry.timestamp || new Date().toISOString(),
+      message: entry.message.trim(),
+      source: entry.source || 'System',
+      level: entry.level || 'info'
     };
 
     this.logs.unshift(newEntry);
@@ -165,8 +183,18 @@ class LogService {
 
       if (filter.timeRange) {
         filteredLogs = filteredLogs.filter(log => {
-          const logTime = new Date(log.timestamp);
-          return logTime >= filter.timeRange!.start && logTime <= filter.timeRange!.end;
+          try {
+            const logTime = new Date(log.timestamp);
+            // 验证日期有效性
+            if (isNaN(logTime.getTime())) {
+              console.warn('跳过无效时间戳的日志:', log.timestamp);
+              return false;
+            }
+            return logTime >= filter.timeRange!.start && logTime <= filter.timeRange!.end;
+          } catch (error) {
+            console.error('时间范围过滤错误:', error, log.timestamp);
+            return false;
+          }
         });
       }
     }
@@ -199,8 +227,19 @@ class LogService {
   exportLogs(filter?: LogFilter): string {
     const logsToExport = this.getLogs(filter);
     const lines = logsToExport.map(log => {
-      const timestamp = new Date(log.timestamp).toLocaleString('zh-CN');
-      return `[${timestamp}] [${log.level.toUpperCase()}] ${log.source ? `[${log.source}] ` : ''}${log.message}`;
+      try {
+        let timestamp = '无效时间';
+        if (log.timestamp) {
+          const date = new Date(log.timestamp);
+          if (!isNaN(date.getTime())) {
+            timestamp = date.toLocaleString('zh-CN');
+          }
+        }
+        return `[${timestamp}] [${log.level.toUpperCase()}] ${log.source ? `[${log.source}] ` : ''}${log.message}`;
+      } catch (error) {
+        console.error('导出日志时间戳处理错误:', error);
+        return `[时间错误] [${log.level.toUpperCase()}] ${log.source ? `[${log.source}] ` : ''}${log.message}`;
+      }
     });
     return lines.join('\n');
   }

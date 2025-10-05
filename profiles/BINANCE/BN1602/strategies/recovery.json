@@ -1,4 +1,4 @@
-{
+﻿{
   "_comment": "BN1602账号解套策略配置（备用）",
   "_derived_from": "profiles/_shared_defaults/strategies/recovery.defaults.json",
   "_status": "disabled",
